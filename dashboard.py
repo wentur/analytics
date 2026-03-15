@@ -44,13 +44,18 @@ AUTH_USERS = {
         "hash": "390e47d3acfa1c528bbb0682006383c58564ad76e5743d6a4ce690528835645d",
         "role": "admin",
         "name": "Администратор",
+        "token": "1a892218533b9581",
     },
     "alisa": {
         "hash": "c2a57c444577c722c3ee30b846c24a250402cfb2d61bd36ff60974e0cfd68c10",
         "role": "user",
         "name": "Алиса",
+        "token": "40b977cc927df9c9",
     },
 }
+
+# Обратный маппинг token → user для быстрого поиска
+_TOKEN_MAP = {u["token"]: {"username": k, "role": u["role"], "name": u["name"]} for k, u in AUTH_USERS.items()}
 
 def _hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
@@ -64,22 +69,33 @@ def _verify_user(username: str, password: str) -> dict | None:
 
 def check_auth() -> dict | None:
     """Главная точка входа авторизации.
-    Возвращает dict пользователя если авторизован, иначе None.
-    При миграции на nginx: return {"username": headers["X-Forwarded-User"], "role": "viewer", "name": "..."}
-    При миграции на OAuth: return verify_oauth_token(cookie)
+    1. Сессия (уже залогинен)
+    2. URL-токен (?token=xxx) — автовход по закладке
+    При миграции на nginx: return {"username": headers["X-Forwarded-User"], ...}
     """
-    return st.session_state.get("_auth_user", None)
+    # Уже залогинен
+    if st.session_state.get("_auth_user"):
+        return st.session_state["_auth_user"]
+
+    # Автовход по URL-токену: ?token=1a892218533b9581
+    token = st.query_params.get("token", "")
+    if token and token in _TOKEN_MAP:
+        user = _TOKEN_MAP[token]
+        st.session_state["_auth_user"] = user
+        return user
+
+    return None
 
 def show_login_page():
     """Показать форму входа. Вызывается если check_auth() == None."""
     # Минимальный CSS для страницы входа
     st.markdown("""<style>
-        .stApp { background: #0a0a0f; }
+        .stApp { background: #08080e !important; }
         [data-testid="stForm"] {
-            background: linear-gradient(145deg, rgba(18,18,30,0.95), rgba(14,14,22,0.98));
-            border: 1px solid rgba(120,80,255,0.2);
-            border-radius: 20px; padding: 40px;
-            max-width: 420px; margin: 80px auto;
+            background: #0e0e16;
+            border: 1px solid rgba(0,255,106,0.1);
+            border-radius: 16px; padding: 36px;
+            max-width: 400px; margin: 70px auto;
         }
     </style>""", unsafe_allow_html=True)
 
@@ -412,205 +428,240 @@ if check_auth() is None:
 # Текущий пользователь (доступен везде)
 CURRENT_USER = check_auth()
 
+# Тема: светлая/тёмная
+if "_theme" not in st.session_state:
+    st.session_state["_theme"] = "dark"
+IS_LIGHT = st.session_state["_theme"] == "light"
+
 st.markdown("""<style>
-    /* === JUICE-INSPIRED DARK THEME === */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    
-    .stApp { background: #0a0a0f; color: #e0e0e8; font-family: 'Inter', sans-serif; }
-    
-    /* Sidebar — deep dark with glow accent */
-    section[data-testid="stSidebar"] { 
-        background: linear-gradient(180deg, #0d0d14 0%, #0a0a10 100%);
-        border-right: 1px solid rgba(120,80,255,0.12);
-    }
-    section[data-testid="stSidebar"] .stRadio > div { gap: 1px; }
-    section[data-testid="stSidebar"] .stRadio label {
-        padding: 10px 14px; border-radius: 12px; font-size: 0.88rem; 
-        transition: all 0.25s ease; color: #8888a0;
-    }
-    section[data-testid="stSidebar"] .stRadio label:hover { 
-        background: rgba(120,80,255,0.08); color: #c0c0d0;
-    }
-    section[data-testid="stSidebar"] .stRadio label[data-checked="true"] {
-        background: linear-gradient(135deg, rgba(120,80,255,0.15), rgba(40,220,160,0.08));
-        border-left: 3px solid #7c4dff; color: #f0f0f8; font-weight: 600;
-    }
-    
-    /* Metric cards — glassmorphism with gradient border */
-    [data-testid="stMetric"] {
-        background: linear-gradient(145deg, rgba(18,18,30,0.9), rgba(14,14,22,0.95));
-        border: 1px solid rgba(120,80,255,0.15);
-        border-radius: 16px; padding: 20px 22px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03);
-        border-left: 4px solid #7c4dff;
-        backdrop-filter: blur(10px);
-    }
-    [data-testid="stMetricValue"] { 
-        font-size: 1.8rem; font-weight: 800; 
-        color: #ffffff; letter-spacing: -0.5px;
-    }
-    [data-testid="stMetricLabel"] { 
-        font-size: 0.72rem; color: #7a7a95; 
-        text-transform: uppercase; letter-spacing: 1.2px; font-weight: 600;
-    }
-    [data-testid="stMetricDelta"] { font-size: 0.82rem; font-weight: 600; }
-    
-    /* Alternate card glow colors */
-    div[data-testid="stHorizontalBlock"] > div:nth-child(1) [data-testid="stMetric"] { border-left-color: #7c4dff; }
-    div[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stMetric"] { border-left-color: #00e676; }
-    div[data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stMetric"] { border-left-color: #ffea00; }
-    div[data-testid="stHorizontalBlock"] > div:nth-child(4) [data-testid="stMetric"] { border-left-color: #ff5252; }
-    div[data-testid="stHorizontalBlock"] > div:nth-child(5) [data-testid="stMetric"] { border-left-color: #e040fb; }
-    div[data-testid="stHorizontalBlock"] > div:nth-child(6) [data-testid="stMetric"] { border-left-color: #18ffff; }
-    
-    /* Typography — clean & modern */
-    h1 { color: #ffffff !important; font-weight: 800 !important; font-size: 1.9rem !important; letter-spacing: -0.5px !important; }
-    h2 { color: #f0f0f8 !important; font-weight: 700 !important; letter-spacing: -0.3px !important; }
-    h3 { color: #d0d0e0 !important; font-weight: 700 !important; }
-    h4 { color: #c0c0d0 !important; font-weight: 600 !important; }
-    p, li { color: #9090a8; line-height: 1.6; }
-    strong { color: #d0d0e0; }
-    
-    /* Tabs — pill style */
-    .stTabs [data-baseweb="tab-list"] { 
-        background: rgba(14,14,24,0.8); border-radius: 14px; 
-        padding: 5px; border: 1px solid rgba(120,80,255,0.1); gap: 4px;
-    }
-    .stTabs [data-baseweb="tab"] { 
-        color: #6a6a80; font-weight: 500; border-radius: 10px; 
-        padding: 8px 18px; transition: all 0.2s;
-    }
-    .stTabs [data-baseweb="tab"]:hover { color: #b0b0c0; background: rgba(120,80,255,0.05); }
-    .stTabs [aria-selected="true"] { 
-        color: #ffffff !important; font-weight: 600;
-        background: linear-gradient(135deg, rgba(120,80,255,0.2), rgba(40,220,160,0.1)) !important;
-        box-shadow: 0 2px 8px rgba(120,80,255,0.15);
-    }
-    
-    /* DataFrames — dark glass */
-    .stDataFrame { 
-        border-radius: 14px; overflow: hidden; 
-        border: 1px solid rgba(120,80,255,0.1);
-        box-shadow: 0 2px 12px rgba(0,0,0,0.2);
-    }
-    
-    /* Buttons — glow on hover */
-    .stButton > button { 
-        border-radius: 12px; border: 1px solid rgba(120,80,255,0.2); 
-        background: rgba(18,18,30,0.8); color: #d0d0e0; 
-        font-weight: 600; transition: all 0.25s ease;
-        backdrop-filter: blur(10px);
-    }
-    .stButton > button:hover { 
-        background: rgba(120,80,255,0.12); border-color: rgba(120,80,255,0.4);
-        box-shadow: 0 0 20px rgba(120,80,255,0.1);
-        color: #ffffff;
-    }
-    .stButton > button[kind="primary"] { 
-        background: linear-gradient(135deg, #7c4dff, #536dfe); 
-        border-color: transparent; color: #fff;
-        box-shadow: 0 4px 15px rgba(124,77,255,0.3);
-    }
-    .stButton > button[kind="primary"]:hover { 
-        background: linear-gradient(135deg, #6a3de8, #4860e6); 
-        box-shadow: 0 4px 25px rgba(124,77,255,0.45);
-    }
-    
-    /* Download buttons */
-    .stDownloadButton > button {
-        border-radius: 12px; border: 1px solid rgba(0,230,118,0.2);
-        background: rgba(0,230,118,0.06); color: #00e676;
-        font-weight: 600;
-    }
-    .stDownloadButton > button:hover {
-        background: rgba(0,230,118,0.12); border-color: rgba(0,230,118,0.4);
-        box-shadow: 0 0 15px rgba(0,230,118,0.1);
-    }
-    
-    /* Expanders — glass card */
-    div[data-testid="stExpander"] { 
-        background: rgba(14,14,24,0.6); 
-        border: 1px solid rgba(120,80,255,0.08); border-radius: 14px;
-    }
-    
-    /* Selectbox, inputs */
-    .stSelectbox > div > div, .stMultiSelect > div > div { 
-        background: rgba(14,14,24,0.8); border-color: rgba(120,80,255,0.12);
-        border-radius: 12px;
-    }
-    
-    /* Text input, text area */
-    .stTextInput > div > div > input, .stTextArea > div > div > textarea {
-        background: rgba(14,14,24,0.8); border-color: rgba(120,80,255,0.12);
-        border-radius: 12px; color: #e0e0e8;
-    }
-    
-    /* Radio buttons (horizontal) */
-    .stRadio > div { gap: 8px; }
-    .stRadio label { 
-        border-radius: 10px; padding: 6px 14px; 
-        transition: all 0.2s; border: 1px solid transparent;
-    }
-    .stRadio label:hover { background: rgba(120,80,255,0.06); }
-    .stRadio label[data-checked="true"] { 
-        background: rgba(120,80,255,0.12); 
-        border-color: rgba(120,80,255,0.3);
-    }
-    
-    /* Chat */
-    .stChatMessage { 
-        background: rgba(14,14,24,0.7) !important; 
-        border: 1px solid rgba(120,80,255,0.08); border-radius: 14px; 
-    }
-    
-    /* Divider */
-    hr { border-color: rgba(120,80,255,0.08) !important; }
-    
-    /* Container */
-    .block-container { padding-top: 1.5rem; padding-bottom: 1rem; max-width: 1200px; }
-    
-    /* Alerts — glass style */
-    .stAlert { border-radius: 14px; backdrop-filter: blur(8px); }
-    
-    /* Success alert */
-    div[data-testid="stAlert"][data-baseweb*="positive"], .element-container .stSuccess {
-        background: rgba(0,230,118,0.06); border: 1px solid rgba(0,230,118,0.15);
-    }
-    
-    /* Caption */
-    .stCaption, [data-testid="stCaptionContainer"] { color: #5a5a70 !important; }
-    
-    /* Scrollbar */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(120,80,255,0.2); border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(120,80,255,0.4); }
-    
-    /* Plotly chart containers */
-    .js-plotly-plot { border-radius: 14px; }
-    
-    /* Links */
-    a { color: #7c4dff; }
-    a:hover { color: #b388ff; }
-    
-    /* Code blocks */
-    code { 
-        background: rgba(120,80,255,0.1); color: #b388ff; 
-        border-radius: 6px; padding: 2px 6px;
-    }
-    
-    /* Markdown tables */
-    table { border-collapse: collapse; }
-    th { background: rgba(120,80,255,0.08); color: #d0d0e0; font-weight: 600; }
-    td, th { border: 1px solid rgba(120,80,255,0.08); padding: 8px 12px; }
-    tr:hover { background: rgba(120,80,255,0.04); }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+:root {
+    --bg:#08080e; --bg2:#0a0a12; --card:#0e0e16;
+    --border:rgba(255,255,255,0.04); --border-h:rgba(0,255,106,0.2);
+    --t1:#fff; --t2:#7a7a92; --t3:#44445a;
+    --green:#00ff6a; --lime:#c8ff00; --yellow:#ffe600; --pink:#ff0090; --purple:#8b5cf6;
+}
+
+/* === BASE === */
+.stApp { background: var(--bg) !important; color: var(--t1); font-family: 'Inter', sans-serif; }
+#MainMenu, footer, header { visibility: hidden; }
+.stDeployButton { display: none; }
+.block-container { padding: 1.2rem 1.5rem 1.5rem; max-width: 100%; }
+
+/* === SIDEBAR === */
+section[data-testid="stSidebar"] { background: var(--bg2); border-right: 1px solid var(--border); }
+section[data-testid="stSidebar"] .stRadio > div { gap: 0; }
+section[data-testid="stSidebar"] .stRadio label {
+    padding: 10px 14px; border-radius: 8px; font-size: .82rem; font-weight: 500;
+    color: #6a6a80; transition: all .15s; margin: 0;
+}
+section[data-testid="stSidebar"] .stRadio label:hover { background: rgba(0,255,106,.03); color: #999; }
+section[data-testid="stSidebar"] .stRadio label[data-checked="true"] {
+    background: rgba(0,255,106,.06); color: var(--green); font-weight: 600;
+    border-left: 2px solid var(--green); padding-left: 12px;
+}
+
+/* === METRIC CARDS (JUICE style) === */
+[data-testid="stMetric"] {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px 14px;
+    transition: all .25s; position: relative; overflow: hidden;
+}
+[data-testid="stMetric"]::after {
+    content:''; position:absolute; top:0; left:0; right:0; height:1.5px;
+    background: linear-gradient(90deg, transparent 10%, rgba(0,255,106,.4) 50%, transparent 90%); opacity:.5;
+}
+[data-testid="stMetric"]:hover {
+    border-color: var(--border-h); transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 0 20px rgba(0,255,106,.03);
+}
+[data-testid="stMetricValue"] {
+    font-size: 1.35rem !important; font-weight: 800; color: #fff;
+    letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.1;
+    white-space: nowrap; overflow: visible;
+}
+[data-testid="stMetricLabel"] {
+    font-size: .55rem; color: var(--t3);
+    text-transform: uppercase; letter-spacing: .1em; font-weight: 700; margin-bottom: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+[data-testid="stMetricDelta"] {
+    font-size: .7rem; font-weight: 700;
+    padding: 2px 8px; border-radius: 12px; display: inline-block;
+    background: rgba(0,255,106,.08);
+}
+[data-testid="stMetricDelta"] svg { display: none; }
+
+/* Accent borders by position */
+div[data-testid="stHorizontalBlock"] > div:nth-child(1) [data-testid="stMetric"] { border-top: 1.5px solid var(--green); }
+div[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stMetric"] { border-top: 1.5px solid var(--lime); }
+div[data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stMetric"] { border-top: 1.5px solid var(--yellow); }
+div[data-testid="stHorizontalBlock"] > div:nth-child(4) [data-testid="stMetric"] { border-top: 1.5px solid var(--pink); }
+div[data-testid="stHorizontalBlock"] > div:nth-child(5) [data-testid="stMetric"] { border-top: 1.5px solid var(--purple); }
+div[data-testid="stHorizontalBlock"] > div:nth-child(6) [data-testid="stMetric"] { border-top: 1.5px solid #00d4ff; }
+
+/* Tight column gaps */
+div[data-testid="stHorizontalBlock"] { gap: 8px !important; }
+
+/* === TYPOGRAPHY === */
+h1 { color:#fff !important; font-weight:800 !important; font-size:1.35rem !important; letter-spacing:-.03em !important; margin-bottom:0 !important; }
+h2 { color:#fff !important; font-weight:700 !important; font-size:1.15rem !important; letter-spacing:-.02em !important; }
+h3 { color:#fff !important; font-weight:600 !important; font-size:.95rem !important; }
+h4 { color:var(--t2) !important; font-weight:500 !important; font-size:.85rem !important; }
+p, li { color: var(--t2); font-size: .82rem; line-height: 1.5; }
+strong { color: #fff; font-weight: 600; }
+
+/* === TABS === */
+.stTabs [data-baseweb="tab-list"] { background:var(--card); border-radius:12px; padding:3px; border:1px solid var(--border); gap:3px; }
+.stTabs [data-baseweb="tab"] { color:var(--t3); font-weight:500; border-radius:9px; padding:8px 16px; font-size:.8rem; transition:all .15s; }
+.stTabs [data-baseweb="tab"]:hover { color:var(--t2); background:rgba(255,255,255,.02); }
+.stTabs [aria-selected="true"] { color:var(--green) !important; font-weight:600; background:rgba(0,255,106,.08) !important; }
+
+/* === DATAFRAMES === */
+.stDataFrame { border-radius:12px; overflow:hidden; border:1px solid var(--border); }
+
+/* === BUTTONS === */
+.stButton > button {
+    border-radius:10px; border:1px solid var(--border); background:var(--card);
+    color:#fff; font-weight:600; font-size:.82rem; padding:.5rem 1rem; transition:all .15s;
+}
+.stButton > button:hover { border-color:var(--border-h); box-shadow:0 0 15px rgba(0,255,106,.05); }
+.stButton > button:active { transform:scale(.98); }
+.stButton > button[kind="primary"] {
+    background:linear-gradient(135deg,#00ff6a,#00cc55); border:none; color:#000; font-weight:800;
+    box-shadow:0 4px 18px rgba(0,255,106,.25);
+}
+.stButton > button[kind="primary"]:hover { box-shadow:0 4px 25px rgba(0,255,106,.4); transform:translateY(-1px); }
+
+/* Download */
+.stDownloadButton > button { border-radius:10px; border:1px solid rgba(0,255,106,.15); background:rgba(0,255,106,.04); color:var(--green); font-weight:600; }
+.stDownloadButton > button:hover { background:rgba(0,255,106,.08); box-shadow:0 0 12px rgba(0,255,106,.08); }
+
+/* === EXPANDER === */
+div[data-testid="stExpander"] { background:var(--card); border:1px solid var(--border); border-radius:12px; }
+div[data-testid="stExpander"]:hover { border-color:rgba(0,255,106,.1); }
+
+/* === INPUTS === */
+.stSelectbox > div > div, .stMultiSelect > div > div { background:var(--card) !important; border-color:var(--border) !important; border-radius:10px !important; }
+.stTextInput > div > div > input, .stTextArea > div > div > textarea {
+    background:var(--card) !important; border-color:var(--border) !important; border-radius:10px !important; color:#fff !important;
+}
+.stTextInput > div > div > input:focus { border-color:var(--green) !important; box-shadow:0 0 0 1px var(--green),0 0 15px rgba(0,255,106,.08) !important; }
+
+/* === RADIO (horizontal) === */
+.stRadio > div { gap:6px; }
+.stRadio label { border-radius:8px; padding:6px 12px; transition:all .15s; border:1px solid transparent; color:var(--t2); font-size:.82rem; }
+.stRadio label:hover { background:rgba(0,255,106,.03); }
+.stRadio label[data-checked="true"] { background:rgba(0,255,106,.06); border-color:rgba(0,255,106,.2); color:var(--green); }
+
+/* === CHAT === */
+.stChatMessage { background:var(--card) !important; border:1px solid var(--border); border-radius:12px; }
+.stChatInputContainer > div { background:var(--card); border-color:var(--border); border-radius:12px; }
+.stChatInputContainer > div:focus-within { border-color:var(--green); box-shadow:0 0 15px rgba(0,255,106,.06); }
+
+/* === DIVIDER === */
+hr { border:none !important; height:1px !important; background:var(--border) !important; margin:.8rem 0 !important; }
+
+/* === ALERTS === */
+.stAlert { border-radius:12px; }
+
+/* === CAPTION === */
+.stCaption, [data-testid="stCaptionContainer"] { color:var(--t3) !important; font-size:.72rem !important; }
+
+/* === SCROLLBAR === */
+::-webkit-scrollbar { width:4px; height:4px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:rgba(0,255,106,.08); border-radius:2px; }
+::-webkit-scrollbar-thumb:hover { background:rgba(0,255,106,.15); }
+
+/* === PLOTLY === */
+.js-plotly-plot { border-radius:12px; }
+
+/* === LINKS === */
+a { color:var(--green); text-decoration:none; }
+a:hover { color:#5aff8a; }
+
+/* === CODE === */
+code { background:rgba(0,255,106,.06); color:#5aff8a; border-radius:4px; padding:1px 5px; font-size:.78rem; }
+
+/* === TABLES === */
+table { border-collapse:collapse; width:100%; }
+th { background:rgba(0,255,106,.03); color:#fff; font-weight:600; font-size:.78rem; }
+td,th { border:1px solid var(--border); padding:8px 12px; font-size:.8rem; }
+tr:hover { background:rgba(0,255,106,.02); }
+
+/* === GLASS CARD (for HTML blocks) === */
+.glass-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px 22px; }
+.glass-card:hover { border-color:rgba(0,255,106,.1); }
+
+/* === BADGES === */
+.badge-success { background:rgba(0,255,106,.1); color:#00ff6a; padding:3px 10px; border-radius:12px; font-size:.68rem; font-weight:700; }
+.badge-warning { background:rgba(255,230,0,.1); color:#ffe600; padding:3px 10px; border-radius:12px; font-size:.68rem; font-weight:700; }
+.badge-error { background:rgba(255,71,87,.1); color:#ff4757; padding:3px 10px; border-radius:12px; font-size:.68rem; font-weight:700; }
+
+/* === RUSSIAN LOADING TEXT === */
+[data-testid="stStatusWidget"] div { visibility: hidden; position: relative; }
+[data-testid="stStatusWidget"] div::after {
+    content: "⏳ Загрузка данных..."; visibility: visible;
+    position: absolute; top: 0; left: 0;
+    font-size: .8rem; color: var(--t2); font-weight: 500;
+}
 </style>""", unsafe_allow_html=True)
 
+# === LIGHT THEME OVERRIDES ===
+if IS_LIGHT:
+    st.markdown("""<style>
+    :root { --bg:#f5f5f8; --bg2:#eeeef2; --card:#ffffff; --border:rgba(0,0,0,0.08);
+        --border-h:rgba(0,180,80,0.3); --t1:#1a1a2e; --t2:#5a5a70; --t3:#9a9ab0;
+        --green:#00b847; --lime:#7ab800; --yellow:#cc9900; --pink:#cc0070; --purple:#6b3fc6; }
+    .stApp { background: var(--bg) !important; color: var(--t1); }
+    section[data-testid="stSidebar"] { background: var(--bg2); border-right: 1px solid var(--border); }
+    section[data-testid="stSidebar"] .stRadio label { color: var(--t2); }
+    section[data-testid="stSidebar"] .stRadio label:hover { background: rgba(0,180,80,.05); color: var(--t1); }
+    section[data-testid="stSidebar"] .stRadio label[data-checked="true"] {
+        background: rgba(0,180,80,.08); color: var(--green); border-left-color: var(--green); }
+    [data-testid="stMetric"] { background: var(--card); border-color: var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    [data-testid="stMetric"]:hover { border-color: var(--border-h); box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    [data-testid="stMetric"]::after { background: linear-gradient(90deg, transparent 10%, rgba(0,180,80,.3) 50%, transparent 90%); }
+    [data-testid="stMetricValue"] { color: var(--t1); }
+    [data-testid="stMetricLabel"] { color: var(--t3); }
+    [data-testid="stMetricDelta"] { background: rgba(0,180,80,.08); }
+    h1,h2,h3 { color: var(--t1) !important; }
+    h4 { color: var(--t2) !important; }
+    p, li { color: var(--t2); }
+    strong { color: var(--t1); }
+    .stTabs [data-baseweb="tab-list"] { background: var(--card); border-color: var(--border); }
+    .stTabs [data-baseweb="tab"] { color: var(--t3); }
+    .stTabs [aria-selected="true"] { color: var(--green) !important; background: rgba(0,180,80,.06) !important; }
+    .stDataFrame { border-color: var(--border); }
+    .stButton > button { background: var(--card); border-color: var(--border); color: var(--t1); }
+    .stButton > button:hover { border-color: var(--border-h); }
+    div[data-testid="stExpander"] { background: var(--card); border-color: var(--border); }
+    .stSelectbox > div > div { background: var(--card) !important; border-color: var(--border) !important; }
+    .stTextInput > div > div > input { background: var(--card) !important; border-color: var(--border) !important; color: var(--t1) !important; }
+    hr { background: var(--border) !important; }
+    .stCaption { color: var(--t3) !important; }
+    .stChatMessage { background: var(--card) !important; border-color: var(--border); }
+    table th { background: rgba(0,180,80,.04); color: var(--t1); }
+    table td,th { border-color: var(--border); }
+    a { color: var(--green); }
+    code { background: rgba(0,180,80,.06); color: var(--green); }
+    ::-webkit-scrollbar-thumb { background: rgba(0,180,80,.15); }
+    .glass-card { background: var(--card); border-color: var(--border); }
+    .stRadio label[data-checked="true"] { background: rgba(0,180,80,.06); border-color: rgba(0,180,80,.2); color: var(--green); }
+    </style>""", unsafe_allow_html=True)
+
 with st.sidebar:
-    # --- Пользователь ---
-    u_col, logout_col = st.columns([3, 1])
+    # --- Пользователь + тема ---
+    u_col, theme_col, logout_col = st.columns([3, 1, 1])
     with u_col:
         st.markdown(f"👤 **{CURRENT_USER['name']}**")
+    with theme_col:
+        theme_icon = "☀️" if IS_LIGHT else "🌙"
+        if st.button(theme_icon, key="theme_btn", help="Светлая/тёмная тема"):
+            st.session_state["_theme"] = "light" if st.session_state["_theme"] == "dark" else "dark"
+            st.rerun()
     with logout_col:
         if st.button("🚪", key="logout_btn", help="Выйти"):
             st.session_state.pop("_auth_user", None)
@@ -689,6 +740,59 @@ def load_payments(d1, d2):
         WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
           AND (p.DBSTATUS IS NULL OR p.DBSTATUS!=-1) AND p.STATE=6
         GROUP BY p.PAYLINETYPE""", (str(d1),str(d2)))
+
+@st.cache_data(ttl=120)
+def load_check_count(d1, d2):
+    """Кол-во уникальных чеков (PRINTCHECKUNI) — ближе к ОФД чем кол-во заказов."""
+    return run_query("""
+        SELECT
+          COUNT(DISTINCT CAST(p.VISIT AS VARCHAR) + CAST(p.MIDSERVER AS VARCHAR) + CAST(p.PRINTCHECKUNI AS VARCHAR)) as CHECKS,
+          COUNT(DISTINCT CAST(o.VISIT AS VARCHAR) + CAST(o.MIDSERVER AS VARCHAR) + CAST(o.IDENTINVISIT AS VARCHAR)) as ORDERS
+        FROM PAYMENTS p
+        JOIN ORDERS o ON p.VISIT=o.VISIT AND p.MIDSERVER=o.MIDSERVER AND p.ORDERIDENT=o.IDENTINVISIT
+        WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
+          AND (p.DBSTATUS IS NULL OR p.DBSTATUS!=-1)
+          AND (o.DBSTATUS IS NULL OR o.DBSTATUS!=-1) AND o.PAID=1""", (str(d1),str(d2)))
+
+@st.cache_data(ttl=120)
+def load_fiscal_checks(d1, d2):
+    """Статистика фискальных чеков из PRINTCHECKS по кассам/столовым."""
+    return run_query("""
+        SELECT r.NAME as REST_NAME, cg.NAME as CASH_NAME,
+            COUNT(*) as TOTAL_CHECKS,
+            SUM(CASE WHEN pc.DELETED=0 OR pc.DELETED IS NULL THEN 1 ELSE 0 END) as ACTIVE_CHECKS,
+            SUM(CASE WHEN pc.DELETED=1 THEN 1 ELSE 0 END) as DELETED_CHECKS,
+            CAST(SUM(CASE WHEN pc.DELETED=0 OR pc.DELETED IS NULL THEN pc.BASICSUM ELSE 0 END) / 100.0 AS INT) as ACTIVE_SUM,
+            SUM(CASE WHEN pc.CORRECTIONRECEIPTTYPE IS NOT NULL AND pc.CORRECTIONRECEIPTTYPE > 0 THEN 1 ELSE 0 END) as CORRECTIONS,
+            SUM(CASE WHEN pc.BILLERROR IS NOT NULL AND pc.BILLERROR > 0 THEN 1 ELSE 0 END) as BILL_ERRORS,
+            SUM(CASE WHEN pc.FISCALIZATIONTYPE IS NULL OR pc.FISCALIZATIONTYPE = 0 THEN 1 ELSE 0 END) as NOT_FISCAL
+        FROM PRINTCHECKS pc
+        JOIN ORDERS o ON pc.VISIT=o.VISIT AND pc.MIDSERVER=o.MIDSERVER AND pc.ORDERIDENT=o.IDENTINVISIT
+        JOIN GLOBALSHIFTS gs ON o.MIDSERVER=gs.MIDSERVER AND o.ICOMMONSHIFT=gs.SHIFTNUM
+        JOIN RESTAURANTS r ON gs.IRESTAURANT=r.SIFR
+        LEFT JOIN CASHGROUPS cg ON pc.MIDSERVER=cg.SIFR
+        WHERE pc.CLOSEDATETIME >= %s AND pc.CLOSEDATETIME < DATEADD(DAY,1,%s)
+          AND (pc.DBSTATUS IS NULL OR pc.DBSTATUS!=-1)
+          AND r.NAME IS NOT NULL
+        GROUP BY r.NAME, cg.NAME
+        ORDER BY TOTAL_CHECKS DESC""", (str(d1), str(d2)))
+
+@st.cache_data(ttl=120)
+def load_fiscal_summary(d1, d2):
+    """Общая сводка фискальных чеков."""
+    return run_query("""
+        SELECT
+            COUNT(*) as TOTAL,
+            SUM(CASE WHEN DELETED=0 OR DELETED IS NULL THEN 1 ELSE 0 END) as ACTIVE,
+            SUM(CASE WHEN DELETED=1 THEN 1 ELSE 0 END) as DELETED,
+            CAST(SUM(CASE WHEN DELETED=0 OR DELETED IS NULL THEN BASICSUM ELSE 0 END) / 100.0 AS INT) as ACTIVE_SUM,
+            SUM(CASE WHEN CORRECTIONRECEIPTTYPE IS NOT NULL AND CORRECTIONRECEIPTTYPE > 0 THEN 1 ELSE 0 END) as CORRECTIONS,
+            SUM(CASE WHEN BILLERROR IS NOT NULL AND BILLERROR > 0 THEN 1 ELSE 0 END) as BILL_ERRORS,
+            SUM(CASE WHEN FISCALIZATIONTYPE IS NULL OR FISCALIZATIONTYPE = 0 THEN 1 ELSE 0 END) as NOT_FISCAL,
+            SUM(CASE WHEN FISCALIZATIONTYPE = 2 THEN 1 ELSE 0 END) as FISCAL_OK
+        FROM PRINTCHECKS
+        WHERE CLOSEDATETIME >= %s AND CLOSEDATETIME < DATEADD(DAY,1,%s)
+          AND (DBSTATUS IS NULL OR DBSTATUS!=-1)""", (str(d1), str(d2)))
 
 @st.cache_data(ttl=120)
 def load_voids(d1, d2):
@@ -913,6 +1017,22 @@ def load_revenue_by_category(d1, d2):
           AND (sd.DBSTATUS IS NULL OR sd.DBSTATUS!=-1) AND sd.QUANTITY>0
           AND c.NAME IS NOT NULL
         GROUP BY c.SIFR, c.NAME ORDER BY TOTAL_SUM DESC""", (str(d1),str(d2)))
+
+@st.cache_data(ttl=120)
+def load_dishes_by_category(d1, d2, cat_id):
+    """Топ блюд внутри конкретной категории."""
+    return run_query("""
+        SELECT TOP 30 mi.NAME as DISH_NAME,
+            SUM(sd.QUANTITY) as TOTAL_QTY, SUM(sd.PRLISTSUM) as TOTAL_SUM,
+            AVG(sd.PRICE) as AVG_PRICE,
+            COUNT(DISTINCT CONCAT(sd.VISIT,'-',sd.ORDERIDENT)) as ORDER_COUNT
+        FROM SESSIONDISHES sd
+        JOIN ORDERS o ON sd.VISIT=o.VISIT AND sd.MIDSERVER=o.MIDSERVER AND sd.ORDERIDENT=o.IDENTINVISIT
+        JOIN MENUITEMS mi ON sd.SIFR=mi.SIFR
+        WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
+          AND (sd.DBSTATUS IS NULL OR sd.DBSTATUS!=-1) AND sd.QUANTITY>0
+          AND mi.PARENT = %s
+        GROUP BY mi.NAME ORDER BY TOTAL_SUM DESC""", (str(d1), str(d2), int(cat_id)))
 
 @st.cache_data(ttl=120)
 def load_top_employees(d1, d2):
@@ -1684,6 +1804,47 @@ def sh_load_foodcost_api(date_from_str, date_to_str):
                "values": [[date_from_str], [date_to_str]]}]
     df, err = sh_exec("FoodCost", params)
     return df, err
+
+@st.cache_data(ttl=120)
+def load_selling_foodcost(d1, d2):
+    """Фудкост из STAT_SH4_SHIFTS_SELLING — экспорт StoreHouse → SQL.
+    Содержит закупочные и продажные цены по каждому товару за день."""
+    return run_query("""
+        SELECT CAST(s.SELLINGDATE AS DATE) as SELL_DATE,
+            s.GOODRID, s.GROUPRID, s.QUANTITY,
+            CAST(s.PURCHASESUMNOTAX AS DECIMAL(18,2)) as PURCHASE,
+            CAST(s.WHOLESALESUMNOTAX AS DECIMAL(18,2)) as SELLING,
+            s.RKSIFR
+        FROM STAT_SH4_SHIFTS_SELLING s
+        WHERE s.SELLINGDATE >= %s AND s.SELLINGDATE < DATEADD(DAY,1,%s)""", (str(d1), str(d2)))
+
+@st.cache_data(ttl=120)
+def load_selling_foodcost_summary(d1, d2):
+    """Сводка фудкоста по дням из SELLING."""
+    return run_query("""
+        SELECT CAST(s.SELLINGDATE AS DATE) as SELL_DATE,
+            COUNT(*) as ITEMS,
+            CAST(SUM(s.PURCHASESUMNOTAX) AS INT) as PURCHASE,
+            CAST(SUM(s.WHOLESALESUMNOTAX) AS INT) as SELLING
+        FROM STAT_SH4_SHIFTS_SELLING s
+        WHERE s.SELLINGDATE >= %s AND s.SELLINGDATE < DATEADD(DAY,1,%s)
+        GROUP BY CAST(s.SELLINGDATE AS DATE)
+        ORDER BY SELL_DATE""", (str(d1), str(d2)))
+
+@st.cache_data(ttl=120)
+def load_selling_foodcost_by_group(d1, d2):
+    """Фудкост по группам товаров из SELLING."""
+    return run_query("""
+        SELECT g.GOODGROUPNAME as GROUP_NAME,
+            COUNT(DISTINCT s.GOODRID) as GOODS_COUNT,
+            CAST(SUM(s.QUANTITY) AS INT) as TOTAL_QTY,
+            CAST(SUM(s.PURCHASESUMNOTAX) AS INT) as PURCHASE,
+            CAST(SUM(s.WHOLESALESUMNOTAX) AS INT) as SELLING
+        FROM STAT_SH4_SHIFTS_SELLING s
+        LEFT JOIN STAT_SH4_SHIFTS_GOODGROUPS g ON s.GROUPRID = g.GOODGROUPRID
+        WHERE s.SELLINGDATE >= %s AND s.SELLINGDATE < DATEADD(DAY,1,%s)
+        GROUP BY g.GOODGROUPNAME
+        ORDER BY SELLING DESC""", (str(d1), str(d2)))
 
 @st.cache_data(ttl=300)
 def sh_load_invoices(date_from_str, date_to_str):
@@ -2692,10 +2853,26 @@ with st.sidebar:
     st.divider()
     st.caption(f"Gemini AI · {len(load_restaurants())} точек · 📦 SH")
 
-CHART_THEME = dict(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="Inter, sans-serif", color="#9090a8"),
-    title_font=dict(color="#e0e0e8", size=16),
-    hoverlabel=dict(bgcolor="rgba(20,20,35,0.95)", font_size=13, font_family="Inter"))
+if IS_LIGHT:
+    CHART_THEME = dict(
+        template="plotly_white",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Inter, sans-serif", color="#5a5a70", size=11),
+        title_font=dict(color="#1a1a2e", size=13, family="Inter"),
+        hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e0e0e8", font_size=12, font_family="Inter"),
+        colorway=["#00b847","#4caf50","#7ab800","#cc9900","#ff9500","#e65100","#cc0070","#6b3fc6"],
+    )
+else:
+    CHART_THEME = dict(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Inter, sans-serif", color="#7a7a92", size=11),
+        title_font=dict(color="#ffffff", size=13, family="Inter"),
+        hoverlabel=dict(bgcolor="#0e0e16", bordercolor="#1a1a28", font_size=12, font_family="Inter"),
+        colorway=["#00ff6a","#5aff8a","#9fff5a","#d4ff00","#ffea00","#ffaa00","#ff6b9d","#ff00aa"],
+    )
 
 # Русские подписи для осей и подсказок plotly
 RU = {
@@ -2897,7 +3074,7 @@ if page == "🔔 Проактив":
                 fig.add_trace(go.Bar(y=merged_chart["REST_NAME"], x=merged_chart["REVENUE (до)"],
                     name="Пред. период", orientation="h", marker_color="rgba(99,102,241,0.4)"))
                 fig.add_trace(go.Bar(y=merged_chart["REST_NAME"], x=merged_chart["REVENUE (сейчас)"],
-                    name="Текущий период", orientation="h", marker_color="#6366f1"))
+                    name="Текущий период", orientation="h", marker_color="#00ff6a"))
                 fig.update_layout(title="📊 Сравнение выручки по точкам", barmode="overlay",
                     height=500, **CHART_THEME, legend=dict(orientation="h",y=1.1))
                 st.plotly_chart(fig, use_container_width=True)
@@ -2926,13 +3103,16 @@ if page == "📈 Выручка":
         rev=float(paid["TOPAYSUM"].sum()); n=len(paid)
         avg_c=rev/n if n else 0; guests=int(paid["GUESTSCOUNT"].sum())
         dishes_n=int(paid["TOTALDISHPIECES"].sum()); disc=float(paid["DISCOUNTSUM"].sum())
+        # Кол-во чеков (ближе к ОФД)
+        checks_df = load_check_count(date_from, date_to)
+        n_checks = int(checks_df.iloc[0]["CHECKS"]) if not checks_df.empty else n
         c1,c2,c3,c4,c5,c6 = st.columns(6)
         with c1: st.metric("💰 Выручка",f"{rev:,.0f} ₽")
         with c2: st.metric("🧾 Заказов",f"{n:,}")
-        with c3: st.metric("📊 Ср. чек",f"{avg_c:,.0f} ₽")
-        with c4: st.metric("👥 Гостей",f"{guests:,}")
-        with c5: st.metric("🍽️ Блюд",f"{dishes_n:,}")
-        with c6: st.metric("🏷️ Скидки",f"{disc:,.0f} ₽")
+        with c3: st.metric("🧾 Чеков",f"{n_checks:,}")
+        with c4: st.metric("📊 Ср. чек",f"{avg_c:,.0f} ₽")
+        with c5: st.metric("👥 Гостей",f"{guests:,}")
+        with c6: st.metric("🍽️ Блюд",f"{dishes_n:,}")
         st.divider()
         cl,cr = st.columns([2,1])
         with cl:
@@ -2940,7 +3120,7 @@ if page == "📈 Выручка":
                 h=load_hourly(date_from,date_to)
                 if not h.empty:
                     fig=go.Figure()
-                    fig.add_trace(go.Bar(x=h["HOUR"],y=h["REVENUE"],name="Выручка",marker_color="#6366f1"))
+                    fig.add_trace(go.Bar(x=h["HOUR"],y=h["REVENUE"],name="Выручка",marker_color="#00ff6a"))
                     fig.add_trace(go.Scatter(x=h["HOUR"],y=h["ORDER_COUNT"],name="Заказы",yaxis="y2",mode="lines+markers",line=dict(color="#f59e0b",width=3)))
                     fig.update_layout(title="По часам",yaxis=dict(title="₽"),yaxis2=dict(title="Шт",side="right",overlaying="y"),height=400,legend=dict(orientation="h",y=1.1),**CHART_THEME)
                     st.plotly_chart(fig,use_container_width=True)
@@ -2948,7 +3128,7 @@ if page == "📈 Выручка":
                 d=load_daily(date_from,date_to)
                 if not d.empty:
                     fig=go.Figure()
-                    fig.add_trace(go.Bar(x=d["DAY"],y=d["REVENUE"],name="Выручка",marker_color="#6366f1"))
+                    fig.add_trace(go.Bar(x=d["DAY"],y=d["REVENUE"],name="Выручка",marker_color="#00ff6a"))
                     fig.add_trace(go.Scatter(x=d["DAY"],y=d["AVG_CHECK"],name="Ср.чек",yaxis="y2",mode="lines+markers",line=dict(color="#10b981",width=3)))
                     fig.update_layout(title="По дням",yaxis=dict(title="₽"),yaxis2=dict(title="Ср.чек",side="right",overlaying="y"),height=400,legend=dict(orientation="h",y=1.1),**CHART_THEME)
                     st.plotly_chart(fig,use_container_width=True)
@@ -2958,6 +3138,111 @@ if page == "📈 Выручка":
                 st.metric("Ср. чек/гость",f"{rev/guests:,.0f} ₽")
                 st.metric("Гостей/заказ",f"{guests/n:.1f}" if n else "—")
                 st.metric("Блюд/заказ",f"{dishes_n/n:.1f}" if n else "—")
+
+        # --- Питание сотрудников ---
+        staff_meals = run_query("""
+            SELECT COUNT(*) as CNT, SUM(p.BASICSUM) as TOTAL
+            FROM PAYMENTS p
+            JOIN ORDERS o ON p.VISIT=o.VISIT AND p.MIDSERVER=o.MIDSERVER AND p.ORDERIDENT=o.IDENTINVISIT
+            WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
+              AND (p.DBSTATUS IS NULL OR p.DBSTATUS!=-1)
+              AND p.PAYLINETYPE = 3""", (str(date_from), str(date_to)))
+        if not staff_meals.empty and staff_meals.iloc[0]["TOTAL"] and float(staff_meals.iloc[0]["TOTAL"]) > 0:
+            sm_total = float(staff_meals.iloc[0]["TOTAL"])
+            sm_cnt = int(staff_meals.iloc[0]["CNT"])
+            sm_pct = (sm_total / rev * 100) if rev > 0 else 0
+            st.divider()
+            st.markdown("### 🍴 Питание сотрудников")
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            with sc1: st.metric("🍴 Сумма", f"{sm_total:,.0f} ₽")
+            with sc2: st.metric("🧾 Транзакций", f"{sm_cnt:,}")
+            with sc3: st.metric("📊 % от выручки", f"{sm_pct:.1f}%")
+            with sc4: st.metric("Ø Чек", f"{sm_total/sm_cnt:,.0f} ₽" if sm_cnt > 0 else "—")
+
+            # Детализация по сотрудникам и столовым
+            with st.expander("📋 Подробнее — кто, где и сколько", expanded=False):
+                staff_detail = run_query("""
+                    SELECT c.NAME as EMPLOYEE, r.NAME as RESTAURANT,
+                        COUNT(*) as MEALS, CAST(SUM(p.BASICSUM) AS INT) as TOTAL_SUM,
+                        CAST(AVG(p.BASICSUM) AS INT) as AVG_CHECK,
+                        CAST(MIN(o.OPENTIME) AS DATE) as FIRST_MEAL,
+                        CAST(MAX(o.OPENTIME) AS DATE) as LAST_MEAL
+                    FROM PAYMENTS p
+                    JOIN CURRENCIES c ON p.SIFR = c.SIFR
+                    JOIN ORDERS o ON p.VISIT=o.VISIT AND p.MIDSERVER=o.MIDSERVER AND p.ORDERIDENT=o.IDENTINVISIT
+                    JOIN GLOBALSHIFTS gs ON o.MIDSERVER=gs.MIDSERVER AND o.ICOMMONSHIFT=gs.SHIFTNUM
+                    JOIN RESTAURANTS r ON gs.IRESTAURANT=r.SIFR
+                    WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
+                      AND (p.DBSTATUS IS NULL OR p.DBSTATUS!=-1)
+                      AND p.PAYLINETYPE = 3
+                      AND r.NAME IS NOT NULL
+                    GROUP BY c.NAME, r.NAME
+                    ORDER BY TOTAL_SUM DESC""", (str(date_from), str(date_to)))
+
+                if not staff_detail.empty:
+                    # Сводка по сотрудникам
+                    st.markdown("#### 👤 По сотрудникам")
+                    by_emp = staff_detail.groupby("EMPLOYEE").agg(
+                        MEALS=("MEALS", "sum"),
+                        TOTAL_SUM=("TOTAL_SUM", "sum"),
+                        RESTAURANTS=("RESTAURANT", lambda x: ", ".join(sorted(x.unique()))),
+                        REST_COUNT=("RESTAURANT", "nunique"),
+                    ).reset_index().sort_values("TOTAL_SUM", ascending=False)
+                    by_emp["AVG_CHECK"] = (by_emp["TOTAL_SUM"] / by_emp["MEALS"]).round(0).astype(int)
+
+                    top_emp = by_emp.head(20)
+                    fig = px.bar(top_emp, x="TOTAL_SUM", y="EMPLOYEE", orientation="h",
+                        title="💰 Топ-20 по сумме питания",
+                        color="MEALS", color_continuous_scale="YlOrRd",
+                        text=top_emp["TOTAL_SUM"].apply(lambda x: f"{x:,}₽"),
+                        labels={"TOTAL_SUM": "Сумма, ₽", "EMPLOYEE": "Сотрудник", "MEALS": "Раз"})
+                    fig.update_traces(textposition="auto")
+                    fig.update_layout(height=max(400, len(top_emp)*28),
+                        yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    disp_emp = by_emp.rename(columns={
+                        "EMPLOYEE": "Сотрудник", "MEALS": "Раз",
+                        "TOTAL_SUM": "Сумма ₽", "AVG_CHECK": "Ø Чек ₽",
+                        "REST_COUNT": "Столовых", "RESTAURANTS": "Где ел(а)"})
+                    st.dataframe(disp_emp, use_container_width=True, hide_index=True, height=400)
+
+                    # Сводка по столовым
+                    st.divider()
+                    st.markdown("#### 🏢 По столовым")
+                    by_rest = staff_detail.groupby("RESTAURANT").agg(
+                        MEALS=("MEALS", "sum"),
+                        TOTAL_SUM=("TOTAL_SUM", "sum"),
+                        EMPLOYEES=("EMPLOYEE", "nunique"),
+                    ).reset_index().sort_values("TOTAL_SUM", ascending=False)
+
+                    fig2 = px.bar(by_rest, x="TOTAL_SUM", y="RESTAURANT", orientation="h",
+                        title="🏢 Питание сотрудников по столовым",
+                        color="EMPLOYEES", color_continuous_scale="Viridis",
+                        text=by_rest["TOTAL_SUM"].apply(lambda x: f"{x:,}₽"),
+                        labels={"TOTAL_SUM": "Сумма, ₽", "RESTAURANT": "Столовая", "EMPLOYEES": "Сотрудников"})
+                    fig2.update_traces(textposition="auto")
+                    fig2.update_layout(height=max(350, len(by_rest)*30),
+                        yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
+                    st.plotly_chart(fig2, use_container_width=True)
+
+                    disp_rest = by_rest.rename(columns={
+                        "RESTAURANT": "Столовая", "MEALS": "Раз",
+                        "TOTAL_SUM": "Сумма ₽", "EMPLOYEES": "Сотрудников"})
+                    st.dataframe(disp_rest, use_container_width=True, hide_index=True)
+
+                    # Полная детализация
+                    st.divider()
+                    st.markdown("#### 📋 Полная таблица")
+                    disp_full = staff_detail.rename(columns={
+                        "EMPLOYEE": "Сотрудник", "RESTAURANT": "Столовая",
+                        "MEALS": "Раз", "TOTAL_SUM": "Сумма ₽", "AVG_CHECK": "Ø Чек ₽",
+                        "FIRST_MEAL": "Первый", "LAST_MEAL": "Последний"})
+                    st.dataframe(disp_full, use_container_width=True, hide_index=True, height=400)
+                    st.download_button("📥 CSV питание сотрудников", staff_detail.to_csv(index=False).encode("utf-8"),
+                        "staff_meals.csv", "text/csv", use_container_width=True)
+                else:
+                    st.info("Нет детализации по сотрудникам")
 
 # --- СЕЗОННОСТЬ ---
 if page == "📅 Сезонность":
@@ -3020,10 +3305,18 @@ if page == "📅 Сезонность":
         # =============== ПЛАШКИ ПО МЕСЯЦАМ ===============
         st.markdown(f"### 📅 Помесячно: {cur_year} vs {prev_year or '—'}")
 
+        # Для текущего года — показываем только прошедшие месяцы
+        now = datetime.now()
+        max_month_cur = now.month if cur_year == now.year else 12
+
         # По 4 месяца в ряд
         for row_start in range(1, 13, 4):
-            cols = st.columns(4)
-            for i, m in enumerate(range(row_start, min(row_start + 4, 13))):
+            # Фильтруем: для текущего года — только прошедшие месяцы
+            months_in_row = [m for m in range(row_start, min(row_start + 4, 13)) if m <= max_month_cur or cur_year < now.year]
+            if not months_in_row:
+                continue
+            cols = st.columns(len(months_in_row))
+            for i, m in enumerate(months_in_row):
                 with cols[i]:
                     cur_rev = cur_data.loc[m, "REVENUE"] if m in cur_data.index else 0
                     cur_orders = cur_data.loc[m, "ORDERS"] if m in cur_data.index else 0
@@ -3049,18 +3342,23 @@ if page == "📅 Сезонность":
                         color = "#555"
                         diff_text = "—"
 
+                    card_bg = "#ffffff" if IS_LIGHT else "linear-gradient(145deg, rgba(18,18,30,0.9), rgba(14,14,22,0.95))"
+                    card_text = "#1a1a2e" if IS_LIGHT else "#e0e0e8"
+                    card_sub = "#5a5a70" if IS_LIGHT else "#9090a8"
+                    card_muted = "#9a9ab0" if IS_LIGHT else "#666"
+
                     # Плашка
                     st.markdown(f"""
-                    <div style="background: linear-gradient(145deg, rgba(18,18,30,0.9), rgba(14,14,22,0.95));
+                    <div style="background: {card_bg};
                         border: 1px solid {color}40; border-left: 4px solid {color};
                         border-radius: 12px; padding: 14px 16px; margin-bottom: 8px;">
-                        <div style="font-size: 0.8rem; color: #9090a8; margin-bottom: 4px;">
+                        <div style="font-size: 0.8rem; color: {card_sub}; margin-bottom: 4px;">
                             {MONTH_NAMES_RU.get(m, m)}</div>
-                        <div style="font-size: 1.3rem; font-weight: 700; color: #e0e0e8;">
+                        <div style="font-size: 1.3rem; font-weight: 700; color: {card_text};">
                             {cur_rev:,.0f} ₽</div>
                         <div style="font-size: 0.75rem; color: {color}; margin-top: 4px;">
                             {diff_text}</div>
-                        <div style="font-size: 0.7rem; color: #666; margin-top: 2px;">
+                        <div style="font-size: 0.7rem; color: {card_muted}; margin-top: 2px;">
                             {prev_year or '—'}: {prev_rev:,.0f} ₽ · {cur_orders:,.0f} заказов</div>
                     </div>""", unsafe_allow_html=True)
 
@@ -3071,7 +3369,7 @@ if page == "📅 Сезонность":
 
         # Подготовка данных для графика
         chart_rows = []
-        for m in range(1, 13):
+        for m in range(1, max_month_cur + 1 if cur_year == now.year else 13):
             cur_rev = float(cur_data.loc[m, "REVENUE"]) if m in cur_data.index else 0
             prev_rev = float(prev_data.loc[m, "REVENUE"]) if not prev_data.empty and m in prev_data.index else 0
             chart_rows.append({"Месяц": MONTH_SHORT[m], "M": m,
@@ -3082,11 +3380,11 @@ if page == "📅 Сезонность":
         fig = go.Figure()
         if prev_year:
             fig.add_trace(go.Bar(name=str(prev_year), x=chart_df["Месяц"],
-                y=chart_df[str(prev_year)], marker_color="rgba(120,80,255,0.4)",
+                y=chart_df[str(prev_year)], marker_color="rgba(0,255,106,0.3)",
                 text=chart_df[str(prev_year)].apply(lambda x: f"{x/1e6:.1f}М" if x > 0 else ""),
                 textposition="auto"))
         fig.add_trace(go.Bar(name=str(cur_year), x=chart_df["Месяц"],
-            y=chart_df[str(cur_year)], marker_color="#7c4dff",
+            y=chart_df[str(cur_year)], marker_color="#00ff6a",
             text=chart_df[str(cur_year)].apply(lambda x: f"{x/1e6:.1f}М" if x > 0 else ""),
             textposition="auto"))
         fig.update_layout(barmode="group", title=f"📊 Выручка по месяцам: {cur_year} vs {prev_year or '—'}",
@@ -3097,7 +3395,7 @@ if page == "📅 Сезонность":
         if prev_year and not prev_data.empty:
             st.divider()
             pct_rows = []
-            for m in range(1, 13):
+            for m in range(1, (max_month_cur + 1) if cur_year == now.year else 13):
                 cur_rev = float(cur_data.loc[m, "REVENUE"]) if m in cur_data.index else 0
                 prev_rev = float(prev_data.loc[m, "REVENUE"]) if m in prev_data.index else 0
                 pct = ((cur_rev / prev_rev - 1) * 100) if prev_rev > 0 else None
@@ -3120,7 +3418,7 @@ if page == "📅 Сезонность":
         st.divider()
         st.markdown("### 📋 Таблица")
         table_rows = []
-        for m in range(1, 13):
+        for m in range(1, (max_month_cur + 1) if cur_year == now.year else 13):
             r = {"Месяц": MONTH_NAMES_RU[m]}
             r[f"Выручка {cur_year}"] = f"{float(cur_data.loc[m, 'REVENUE']):,.0f} ₽" if m in cur_data.index else "—"
             r[f"Заказов {cur_year}"] = f"{int(cur_data.loc[m, 'ORDERS']):,}" if m in cur_data.index else "—"
@@ -3226,6 +3524,40 @@ if page == "🗂️ Категории":
             st.plotly_chart(fig, use_container_width=True)
         st.dataframe(cat_data.rename(columns={"CAT_ID":"ID","CATEGORY":"Категория","TOTAL_QTY":"Кол-во",
             "TOTAL_SUM":"Выручка","ORDER_COUNT":"Заказов"}), use_container_width=True, hide_index=True)
+
+        # === Drill-down: топ блюд в категории ===
+        st.divider()
+        st.markdown("### 🔍 Топ блюд в категории")
+        cat_options = cat_data[["CAT_ID", "CATEGORY"]].copy()
+        cat_options["label"] = cat_options["CATEGORY"] + " (" + cat_data["TOTAL_SUM"].apply(lambda x: f"{x:,.0f} ₽") + ")"
+        selected_cat_label = st.selectbox("Выберите категорию:", cat_options["label"].tolist(), key="cat_drill")
+        selected_idx = cat_options["label"].tolist().index(selected_cat_label)
+        selected_cat_id = int(cat_options.iloc[selected_idx]["CAT_ID"])
+        selected_cat_name = cat_options.iloc[selected_idx]["CATEGORY"]
+
+        dishes_in_cat = load_dishes_by_category(date_from, date_to, selected_cat_id)
+        if not dishes_in_cat.empty:
+            c1,c2,c3 = st.columns(3)
+            with c1: st.metric("🍽 Блюд", f"{len(dishes_in_cat)}")
+            with c2: st.metric("💰 Выручка", f"{dishes_in_cat['TOTAL_SUM'].sum():,.0f} ₽")
+            with c3: st.metric("📦 Продано шт.", f"{dishes_in_cat['TOTAL_QTY'].sum():,.0f}")
+
+            fig_d = px.bar(dishes_in_cat.head(20), x="TOTAL_SUM", y="DISH_NAME", orientation="h",
+                title=f"🏆 Топ блюд — {selected_cat_name}",
+                color="TOTAL_SUM", color_continuous_scale="Viridis",
+                text=dishes_in_cat.head(20)["TOTAL_SUM"].apply(lambda x: f"{x:,.0f}₽"),
+                labels={"TOTAL_SUM": "Выручка, ₽", "DISH_NAME": "Блюдо"})
+            fig_d.update_traces(textposition="auto")
+            fig_d.update_layout(height=max(400, len(dishes_in_cat.head(20))*25),
+                yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
+            st.plotly_chart(fig_d, use_container_width=True)
+
+            disp_d = dishes_in_cat.rename(columns={
+                "DISH_NAME":"Блюдо","TOTAL_QTY":"Кол-во","TOTAL_SUM":"Выручка ₽",
+                "AVG_PRICE":"Ø Цена ₽","ORDER_COUNT":"Заказов"})
+            st.dataframe(disp_d, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"Нет блюд в категории «{selected_cat_name}»")
     else: st.info("Нет данных по категориям")
 
 # --- ПЕРСОНАЛ ---
@@ -3347,7 +3679,7 @@ if page == "📊 Цены":
         # Min vs Max (диапазон)
         fig = go.Figure()
         top20 = prices.head(20)
-        fig.add_trace(go.Bar(x=top20["DISH_NAME"], y=top20["MIN_PRICE"], name="Мин. цена", marker_color="#6366f1"))
+        fig.add_trace(go.Bar(x=top20["DISH_NAME"], y=top20["MIN_PRICE"], name="Мин. цена", marker_color="#00ff6a"))
         fig.add_trace(go.Bar(x=top20["DISH_NAME"], y=top20["PRICE_DIFF"], name="Разница", marker_color="#ef4444"))
         fig.update_layout(title="📊 Диапазон цен (мин + разница = макс)", barmode="stack",
             height=400, xaxis_tickangle=-45, **CHART_THEME)
@@ -3540,7 +3872,7 @@ if page == "⏱️ Скорость":
                 name="Ср. время (сек)", marker_color="#f59e0b"))
             fig.add_trace(go.Scatter(x=speed_hour["HOUR"], y=speed_hour["ORDERS"],
                 name="Заказов", yaxis="y2", mode="lines+markers",
-                line=dict(color="#6366f1", width=3)))
+                line=dict(color="#00ff6a", width=3)))
             fig.update_layout(title="⏰ Скорость по часам дня",
                 yaxis=dict(title="Ср. время, сек"), yaxis2=dict(title="Заказов", side="right", overlaying="y"),
                 height=400, legend=dict(orientation="h", y=1.1), **CHART_THEME)
@@ -3624,9 +3956,9 @@ if page == "🕐 Смены":
 
 # --- ПРОБЛЕМЫ ---
 if page == "⚠️ Проблемы":
-    page_header("Проблемы: карты и маркировка", "⚠️")
+    page_header("Проблемы: карты, маркировка, чеки", "⚠️")
     
-    sub_mark, sub_cards = st.tabs(["🏷️ Честный знак", "💳 Проблемы с картами"])
+    sub_mark, sub_cards, sub_fiscal = st.tabs(["🏷️ Честный знак", "💳 Проблемы с картами", "🧾 Фискализация"])
 
     # ========== ЧЕСТНЫЙ ЗНАК ==========
     with sub_mark:
@@ -3662,13 +3994,13 @@ if page == "⚠️ Проблемы":
             cl,cr = st.columns(2)
             with cl:
                 fig = px.pie(stats, values="CNT", names="STATUS", title="Результаты проверок",
-                    color_discrete_map={"🟢 ОК":"#10b981","🔴 Ошибка":"#ef4444","🟡 Предупреждение":"#f59e0b","⏱️ Таймаут":"#6366f1"}, hole=0.4, labels=RU)
+                    color_discrete_map={"🟢 ОК":"#10b981","🔴 Ошибка":"#ef4444","🟡 Предупреждение":"#f59e0b","⏱️ Таймаут":"#00ff6a"}, hole=0.4, labels=RU)
                 fig.update_layout(height=400, **CHART_THEME)
                 st.plotly_chart(fig, use_container_width=True)
             with cr:
                 fig = px.bar(stats[stats["RES"]!=0], x="CNT", y="STATUS", orientation="h",
                     title="Проблемные проверки", color="STATUS",
-                    color_discrete_map={"🔴 Ошибка":"#ef4444","🟡 Предупреждение":"#f59e0b","⏱️ Таймаут":"#6366f1"}, labels=RU)
+                    color_discrete_map={"🔴 Ошибка":"#ef4444","🟡 Предупреждение":"#f59e0b","⏱️ Таймаут":"#00ff6a"}, labels=RU)
                 fig.update_layout(height=400, showlegend=False, **CHART_THEME)
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -3824,6 +4156,91 @@ if page == "⚠️ Проблемы":
                 st.info("Нет данных по столовым")
         else:
             st.info("Нет данных по картам")
+
+    # ========== ФИСКАЛИЗАЦИЯ ==========
+    with sub_fiscal:
+        st.markdown("""
+        **Что это:** Статус пробития чеков на ККТ. Показывает фискализированные, нефискализированные, удалённые чеки и ошибки.
+        """)
+        st.divider()
+
+        fiscal_sum = load_fiscal_summary(date_from, date_to)
+        if not fiscal_sum.empty:
+            fs = fiscal_sum.iloc[0]
+            total = int(fs["TOTAL"]) if fs["TOTAL"] else 0
+            active = int(fs["ACTIVE"]) if fs["ACTIVE"] else 0
+            deleted = int(fs["DELETED"]) if fs["DELETED"] else 0
+            active_sum = int(fs["ACTIVE_SUM"]) if fs["ACTIVE_SUM"] else 0
+            corrections = int(fs["CORRECTIONS"]) if fs["CORRECTIONS"] else 0
+            bill_errors = int(fs["BILL_ERRORS"]) if fs["BILL_ERRORS"] else 0
+            not_fiscal = int(fs["NOT_FISCAL"]) if fs["NOT_FISCAL"] else 0
+            fiscal_ok = int(fs["FISCAL_OK"]) if fs["FISCAL_OK"] else 0
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+            with c1: st.metric("🧾 Всего чеков", f"{total:,}")
+            with c2: st.metric("✅ Фискализировано", f"{fiscal_ok:,}")
+            with c3: st.metric("❌ Не фискализировано", f"{not_fiscal:,}")
+            with c4: st.metric("🗑 Удалённых", f"{deleted:,}")
+            with c5: st.metric("💰 Сумма", f"{active_sum:,} ₽")
+
+            # Предупреждения
+            if not_fiscal > 0:
+                st.error(f"🚨 {not_fiscal} чеков НЕ фискализированы! Они не отправлены в ОФД/налоговую.")
+            if bill_errors > 0:
+                st.warning(f"⚠️ {bill_errors} чеков с ошибками печати (BILLERROR)")
+            if corrections > 0:
+                st.info(f"📋 {corrections} чеков коррекции")
+            if not_fiscal == 0 and bill_errors == 0 and deleted == 0:
+                st.success(f"✅ Все {fiscal_ok:,} чеков успешно фискализированы")
+
+            # По столовым
+            st.divider()
+            st.markdown("### 🏢 По столовым и кассам")
+            fiscal_detail = load_fiscal_checks(date_from, date_to)
+            if not fiscal_detail.empty:
+                # Сводка по столовым
+                by_rest = fiscal_detail.groupby("REST_NAME").agg(
+                    TOTAL=("TOTAL_CHECKS", "sum"),
+                    ACTIVE=("ACTIVE_CHECKS", "sum"),
+                    DELETED=("DELETED_CHECKS", "sum"),
+                    ERRORS=("BILL_ERRORS", "sum"),
+                    NOT_FISCAL=("NOT_FISCAL", "sum"),
+                    CORRECTIONS=("CORRECTIONS", "sum"),
+                    SUM=("ACTIVE_SUM", "sum"),
+                ).reset_index().sort_values("TOTAL", ascending=False)
+
+                # Проблемные столовые
+                problems = by_rest[(by_rest["NOT_FISCAL"] > 0) | (by_rest["ERRORS"] > 0) | (by_rest["DELETED"] > 0)]
+                if not problems.empty:
+                    st.markdown("#### ⚠️ Столовые с проблемами")
+                    fig = px.bar(problems, x="NOT_FISCAL", y="REST_NAME", orientation="h",
+                        title="❌ Нефискализированные чеки по столовым",
+                        color="NOT_FISCAL", color_continuous_scale="Reds",
+                        text="NOT_FISCAL",
+                        labels={"NOT_FISCAL": "Не фискализировано", "REST_NAME": "Столовая"})
+                    fig.update_traces(textposition="auto")
+                    fig.update_layout(height=max(300, len(problems)*30),
+                        yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # Полная таблица
+                disp = by_rest.rename(columns={
+                    "REST_NAME": "Столовая", "TOTAL": "Всего", "ACTIVE": "Активных",
+                    "DELETED": "Удалённых", "ERRORS": "Ошибок", "NOT_FISCAL": "Не фискал.",
+                    "CORRECTIONS": "Коррекций", "SUM": "Сумма ₽"})
+                st.dataframe(disp, use_container_width=True, hide_index=True)
+
+                # Детализация по кассам
+                with st.expander("📋 Детализация по кассам"):
+                    disp_full = fiscal_detail.rename(columns={
+                        "REST_NAME": "Столовая", "CASH_NAME": "Касса",
+                        "TOTAL_CHECKS": "Всего", "ACTIVE_CHECKS": "Активных",
+                        "DELETED_CHECKS": "Удалённых", "ACTIVE_SUM": "Сумма ₽",
+                        "CORRECTIONS": "Коррекций", "BILL_ERRORS": "Ошибок",
+                        "NOT_FISCAL": "Не фискал."})
+                    st.dataframe(disp_full, use_container_width=True, hide_index=True)
+        else:
+            st.info("Нет данных по фискальным чекам за период")
 
 # --- ОТКАЗЫ И ОТМЕНЫ ---
 if page == "❌ Отказы":
@@ -4470,7 +4887,7 @@ if page == "📦 Склад":
                     fig = px.histogram(grouped, x="AVG_PURCHASE_PRICE", nbins=40,
                         title="📊 Распределение закупочных цен",
                         labels={"AVG_PURCHASE_PRICE": "Средняя цена, ₽"},
-                        color_discrete_sequence=["#7c4dff"])
+                        color_discrete_sequence=["#00ff6a"])
                     fig.update_layout(height=350, **CHART_THEME)
                     st.plotly_chart(fig, use_container_width=True)
                 with cr:
@@ -4993,62 +5410,158 @@ if page == "📄 Накладные":
 # --- ФУДКОСТ ---
 if page == "🍳 Фудкост":
     page_header("Фудкост", "🍳")
-    st.caption(f"StoreHouse API: {SH_API['url']}")
+    st.caption(f"Источник: STAT_SH4_SHIFTS_SELLING (экспорт StoreHouse → SQL)")
 
-    d1_str = str(date_from)
-    d2_str = str(date_to)
+    # Загрузка данных с названиями
+    selling = run_query("""
+        SELECT CAST(s.SELLINGDATE AS DATE) as SELL_DATE,
+            s.GOODRID, s.GROUPRID, s.RKSIFR,
+            mi.NAME as DISH_NAME,
+            SUM(s.QUANTITY) as QTY,
+            CAST(SUM(s.PURCHASESUMNOTAX) AS DECIMAL(18,2)) as PURCHASE,
+            CAST(SUM(s.WHOLESALESUMNOTAX) AS DECIMAL(18,2)) as SELLING
+        FROM STAT_SH4_SHIFTS_SELLING s
+        LEFT JOIN MENUITEMS mi ON s.RKSIFR = mi.SIFR
+        WHERE s.SELLINGDATE >= %s AND s.SELLINGDATE < DATEADD(DAY,1,%s)
+        GROUP BY CAST(s.SELLINGDATE AS DATE), s.GOODRID, s.GROUPRID, s.RKSIFR, mi.NAME""",
+        (str(date_from), str(date_to)))
+    # Справочник точек продажи
+    _locs = run_query("SELECT RID, NAME FROM STAT_SH4_SALELOCATIONS WHERE NAME IS NOT NULL")
+    _loc_map = dict(zip(_locs["RID"], _locs["NAME"])) if not _locs.empty else {}
+    if not selling.empty:
+        selling["DISH_NAME"] = selling["DISH_NAME"].fillna("Товар #" + selling["GOODRID"].astype(str))
 
-    sub_fc, sub_sell = st.tabs(["🍳 Фудкост (FoodCost)", "📈 Продажи (Selling)"])
+    if selling.empty:
+        st.warning("⚠️ Нет данных в STAT_SH4_SHIFTS_SELLING за выбранный период. Экспорт SH → SQL ещё не выполнен или период не покрыт.")
+        st.info("Данные загружаются из StoreHouse за последние 30 дней. Проверьте что экспорт настроен.")
+    else:
+        total_purchase = float(selling["PURCHASE"].sum())
+        total_selling = float(selling["SELLING"].sum())
+        total_margin = total_selling - total_purchase
+        avg_foodcost = (total_purchase / total_selling * 100) if total_selling > 0 else 0
+        n_days = selling["SELL_DATE"].nunique()
+        n_goods = selling["GOODRID"].nunique()
 
-    with sub_fc:
-        fc_df, fc_err = sh_load_foodcost_api(d1_str, d2_str)
-        if fc_err:
-            st.warning(f"⚠️ FoodCost: {fc_err}")
-            st.markdown("""
-            **Нужны права на процедуру `FoodCost`.**
+        # === СВОДНЫЕ МЕТРИКИ ===
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.metric("💵 Продажи", f"{total_selling:,.0f} ₽")
+        with c2: st.metric("📦 Себестоимость", f"{total_purchase:,.0f} ₽")
+        with c3:
+            st.metric("💰 Маржа", f"{total_margin:,.0f} ₽",
+                delta=f"{total_margin/max(1,total_selling)*100:.1f}% от продаж")
+        with c4:
+            fc_color = "normal" if 25 <= avg_foodcost <= 35 else "inverse"
+            st.metric("🍳 Фудкост", f"{avg_foodcost:.1f}%",
+                delta="норма" if 25 <= avg_foodcost <= 35 else ("выше нормы" if avg_foodcost > 35 else "ниже нормы"),
+                delta_color=fc_color)
 
-            Фудкост покажет себестоимость каждого блюда и наценку. Для этого попросите администратора
-            StoreHouse выдать права пользователю `readonly` на процедуру **FoodCost**.
+        st.divider()
 
-            **Пока можно оценить фудкост косвенно:**
-            - Средний чек и популярные блюда — на странице 📈 Выручка
-            - Цены продажи — на странице 📊 Цены
-            - ABC-анализ — на странице 🔤 ABC
-            """)
-        elif not fc_df.empty:
-            st.success(f"✅ Загружено {len(fc_df)} позиций")
-            st.dataframe(sh_clean_df(fc_df), use_container_width=True, hide_index=True, height=500)
+        # === ТАБЫ ===
+        tab_daily, tab_groups, tab_detail, tab_table = st.tabs([
+            "📅 По дням", "🏢 По столовым", "🏷️ По товарам", "📋 Таблица"])
 
-            # Автоматические графики по числовым колонкам
-            num_cols = fc_df.select_dtypes(include=["number"]).columns.tolist()
-            str_cols = fc_df.select_dtypes(include=["object"]).columns.tolist()
-            if num_cols and str_cols:
-                val_col = st.selectbox("Показать по:", num_cols, index=0, key="fc_val")
-                label_col = str_cols[0]
-                top30 = fc_df.sort_values(val_col, ascending=False).head(30)
-                fig = px.bar(top30, x=val_col, y=label_col, orientation="h",
-                    title=f"Топ-30 по {val_col}", color=val_col, color_continuous_scale="RdYlGn_r", labels=RU)
-                fig.update_layout(height=max(400, min(30, len(top30))*25),
-                    yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+        # ---- ПО ДНЯМ ----
+        with tab_daily:
+            by_day = selling.groupby("SELL_DATE").agg(
+                PURCHASE=("PURCHASE", "sum"), SELLING=("SELLING", "sum"),
+                GOODS=("GOODRID", "nunique"), QTY=("QTY", "sum")
+            ).reset_index().sort_values("SELL_DATE")
+            by_day["FC_PCT"] = (by_day["PURCHASE"] / by_day["SELLING"].replace(0, 1) * 100).round(1)
+            by_day["MARGIN"] = by_day["SELLING"] - by_day["PURCHASE"]
 
-            st.download_button("📥 CSV", fc_df.to_csv(index=False).encode("utf-8"),
-                "foodcost.csv", "text/csv", use_container_width=True)
-        else:
-            st.info("Нет данных по фудкосту за период")
+            fig = go.Figure()
+            fig.add_trace(go.Bar(x=by_day["SELL_DATE"], y=by_day["SELLING"],
+                name="Продажи", marker_color="#00ff6a"))
+            fig.add_trace(go.Bar(x=by_day["SELL_DATE"], y=by_day["PURCHASE"],
+                name="Себестоимость", marker_color="#ff6b9d"))
+            fig.add_trace(go.Scatter(x=by_day["SELL_DATE"], y=by_day["FC_PCT"],
+                name="Фудкост %", yaxis="y2", mode="lines+markers",
+                line=dict(color="#ffea00", width=3)))
+            fig.update_layout(barmode="group",
+                title="📅 Продажи vs Себестоимость по дням",
+                yaxis=dict(title="₽"),
+                yaxis2=dict(title="Фудкост %", side="right", overlaying="y", range=[0, 50]),
+                height=400, legend=dict(orientation="h", y=1.1), **CHART_THEME)
+            st.plotly_chart(fig, use_container_width=True)
 
-    with sub_sell:
-        sell_df, sell_err = sh_load_selling(d1_str, d2_str)
-        if sell_err:
-            st.warning(f"⚠️ Selling: {sell_err}")
-            st.caption("Нужны права на процедуру `Selling`")
-        elif not sell_df.empty:
-            st.success(f"✅ Загружено {len(sell_df)} строк продаж")
-            st.dataframe(sh_clean_df(sell_df), use_container_width=True, hide_index=True, height=500)
-            st.download_button("📥 CSV", sell_df.to_csv(index=False).encode("utf-8"),
-                "selling.csv", "text/csv", use_container_width=True)
-        else:
-            st.info("Нет данных по продажам за период")
+            disp_day = by_day.copy()
+            disp_day.columns = ["Дата", "Себестоимость", "Продажи", "Товаров", "Кол-во", "Фудкост %", "Маржа"]
+            st.dataframe(disp_day, use_container_width=True, hide_index=True)
+
+        # ---- ПО СТОЛОВЫМ (GROUPRID) ----
+        with tab_groups:
+            by_group = selling.groupby("GROUPRID").agg(
+                PURCHASE=("PURCHASE", "sum"), SELLING=("SELLING", "sum"),
+                GOODS=("GOODRID", "nunique"), QTY=("QTY", "sum")
+            ).reset_index().sort_values("SELLING", ascending=False)
+            by_group["FC_PCT"] = (by_group["PURCHASE"] / by_group["SELLING"].replace(0, 1) * 100).round(1)
+            # Справочник товарных групп
+            _gg = run_query("SELECT RID, NAME FROM STAT_SH4_SHIFTS_GOODGROUPS WHERE NAME IS NOT NULL")
+            _gg_map = dict(zip(_gg["RID"], _gg["NAME"])) if not _gg.empty else {}
+            # Названия: SALELOCATIONS (0-39) или GOODGROUPS
+            def _resolve_group(rid):
+                if rid in _loc_map:
+                    return _loc_map[rid]
+                if rid in _gg_map:
+                    return _gg_map[rid]
+                return f"Группа #{rid}"
+            by_group["LOCATION"] = by_group["GROUPRID"].apply(_resolve_group)
+
+            fig2 = px.bar(by_group.head(20), x="SELLING", y="LOCATION", orientation="h",
+                title="🏢 Продажи по точкам", color="FC_PCT", color_continuous_scale="RdYlGn_r",
+                text=by_group.head(20)["SELLING"].apply(lambda x: f"{x:,.0f}₽"),
+                labels={"SELLING": "Продажи ₽", "LOCATION": "Точка", "FC_PCT": "Фудкост %"})
+            fig2.update_traces(textposition="auto")
+            fig2.update_layout(height=max(400, len(by_group.head(20))*30),
+                yaxis=dict(autorange="reversed"), **CHART_THEME)
+            st.plotly_chart(fig2, use_container_width=True)
+
+            disp_gr = by_group[["LOCATION","SELLING","PURCHASE","FC_PCT","GOODS","QTY"]].copy()
+            disp_gr.columns = ["Точка","Продажи ₽","Себестоимость ₽","Фудкост %","Товаров","Кол-во"]
+            st.dataframe(disp_gr, use_container_width=True, hide_index=True)
+
+        # ---- ПО ТОВАРАМ ----
+        with tab_detail:
+            by_good = selling.groupby(["GOODRID","DISH_NAME"]).agg(
+                PURCHASE=("PURCHASE", "sum"), SELLING=("SELLING", "sum"),
+                QTY=("QTY", "sum")
+            ).reset_index().sort_values("SELLING", ascending=False)
+            by_good["FC_PCT"] = (by_good["PURCHASE"] / by_good["SELLING"].replace(0, 1) * 100).round(1)
+            by_good["MARGIN"] = by_good["SELLING"] - by_good["PURCHASE"]
+
+            # Топ-20 по продажам
+            top = by_good.head(20)
+            fig3 = go.Figure()
+            fig3.add_trace(go.Bar(y=top["DISH_NAME"],
+                x=top["SELLING"], name="Продажи", orientation="h", marker_color="#00ff6a"))
+            fig3.add_trace(go.Bar(y=top["DISH_NAME"],
+                x=top["PURCHASE"], name="Себестоимость", orientation="h", marker_color="#ff6b9d"))
+            fig3.update_layout(barmode="group", title="🏷️ Топ-20 блюд: продажи vs себестоимость",
+                height=max(400, len(top)*28), yaxis=dict(autorange="reversed"), **CHART_THEME)
+            st.plotly_chart(fig3, use_container_width=True)
+
+            # Проблемные товары (фудкост > 40%)
+            high_fc = by_good[(by_good["FC_PCT"] > 40) & (by_good["SELLING"] > 1000)].sort_values("FC_PCT", ascending=False)
+            if not high_fc.empty:
+                st.warning(f"⚠️ {len(high_fc)} товаров с фудкостом > 40%")
+                st.dataframe(high_fc.head(20).rename(columns={
+                    "DISH_NAME":"Блюдо","GOODRID":"ID SH","PURCHASE":"Себестоим.",
+                    "SELLING":"Продажи","QTY":"Кол-во","FC_PCT":"Фудкост %","MARGIN":"Маржа"}),
+                    use_container_width=True, hide_index=True)
+
+            st.divider()
+            st.dataframe(by_good.rename(columns={
+                "DISH_NAME":"Блюдо","GOODRID":"ID SH","PURCHASE":"Себестоим.",
+                "SELLING":"Продажи","QTY":"Кол-во","FC_PCT":"Фудкост %","MARGIN":"Маржа"}),
+                use_container_width=True, hide_index=True, height=500)
+
+        # ---- ТАБЛИЦА (сырые данные) ----
+        with tab_table:
+            st.markdown(f"**{len(selling):,}** строк за {date_from} — {date_to}")
+            st.dataframe(selling, use_container_width=True, hide_index=True, height=500)
+            st.download_button("📥 CSV фудкост", selling.to_csv(index=False).encode("utf-8"),
+                "foodcost_selling.csv", "text/csv", use_container_width=True)
 
 # --- ФУДКОСТ (РАСЧЁТ) ---
 if page == "🔀 Фудкост (расчёт)":
@@ -5181,6 +5694,35 @@ if page == "🔀 Фудкост (расчёт)":
                                   delta="норма" if 25 <= avg_foodcost <= 35 else ("выше нормы" if avg_foodcost > 35 else "ниже нормы"),
                                   delta_color=fc_color)
 
+                    # Покрытие выручки рецептурами
+                    full_revenue = float(load_orders(date_from, date_to)["TOPAYSUM"].sum()) if not load_orders(date_from, date_to).empty else 0
+                    if full_revenue > 0:
+                        coverage_pct = total_revenue / full_revenue * 100
+                        uncovered = full_revenue - total_revenue
+                        cov_color = "#00ff6a" if coverage_pct >= 80 else "#ffe600" if coverage_pct >= 60 else "#ff4757"
+                        st.markdown(f"""
+                        <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin-top:8px;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;">
+                                <div>
+                                    <span style="color:var(--t3);font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;font-weight:700;">Покрытие выручки рецептурами</span>
+                                    <div style="display:flex;align-items:baseline;gap:6px;margin-top:4px;">
+                                        <span style="font-size:1.3rem;font-weight:800;color:{cov_color};">{coverage_pct:.1f}%</span>
+                                        <span style="color:var(--t3);font-size:.8rem;">{total_revenue:,.0f} из {full_revenue:,.0f} ₽</span>
+                                    </div>
+                                </div>
+                                <div style="text-align:right;">
+                                    <span style="color:var(--t3);font-size:.7rem;">Без рецептур</span>
+                                    <div style="color:#ff9500;font-weight:700;font-size:.9rem;">{uncovered:,.0f} ₽ ({100-coverage_pct:.1f}%)</div>
+                                </div>
+                            </div>
+                            <div style="margin-top:10px;height:4px;background:rgba(255,255,255,.03);border-radius:2px;overflow:hidden;">
+                                <div style="width:{min(coverage_pct,100):.1f}%;height:100%;background:linear-gradient(90deg,{cov_color},{'#b8ff00' if coverage_pct>=60 else '#ff9500'});border-radius:2px;"></div>
+                            </div>
+                            <div style="color:var(--t3);font-size:.65rem;margin-top:6px;">
+                                ℹ️ Блюда без рецептур: напитки, покупные товары (шоколадки, снеки), блюда с несовпавшими названиями между RK и SH
+                            </div>
+                        </div>""", unsafe_allow_html=True)
+
                     st.divider()
 
                     # ---- ПОМЕСЯЧНАЯ АНАЛИТИКА ----
@@ -5226,7 +5768,7 @@ if page == "🔀 Фудкост (расчёт)":
                             # График 1: Выручка, Себестоимость, Маржа
                             fig = go.Figure()
                             fig.add_trace(go.Bar(x=by_month["MONTH"], y=by_month["REVENUE"],
-                                name="Выручка", marker_color="#6366f1", text=by_month["REVENUE"].apply(lambda x: f"{x:,.0f}"),
+                                name="Выручка", marker_color="#00ff6a", text=by_month["REVENUE"].apply(lambda x: f"{x:,.0f}"),
                                 textposition="auto"))
                             fig.add_trace(go.Bar(x=by_month["MONTH"], y=by_month["COST"],
                                 name="Себестоимость", marker_color="#ef4444", text=by_month["COST"].apply(lambda x: f"{x:,.0f}"),
@@ -5289,7 +5831,7 @@ if page == "🔀 Фудкост (расчёт)":
                     with cr:
                         fig = px.histogram(fc_fc, x="FOODCOST_PCT", nbins=40,
                             title="Распределение фудкоста, %",
-                            labels={"FOODCOST_PCT": "Фудкост %"}, color_discrete_sequence=["#7c4dff"])
+                            labels={"FOODCOST_PCT": "Фудкост %"}, color_discrete_sequence=["#00ff6a"])
                         fig.add_vline(x=25, line_dash="dash", line_color="#10b981", annotation_text="25%")
                         fig.add_vline(x=35, line_dash="dash", line_color="#ef4444", annotation_text="35%")
                         fig.update_layout(height=380, **CHART_THEME)

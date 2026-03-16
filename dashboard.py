@@ -3,6 +3,15 @@
 Расширенная версия: рестораны, категории, персонал, касса
 """
 
+# === Auto-setup: config.toml рядом с dashboard.py → .streamlit/config.toml ===
+import os, shutil, pathlib
+_script_dir = pathlib.Path(__file__).parent
+_config_src = _script_dir / "config.toml"
+_config_dst = _script_dir / ".streamlit" / "config.toml"
+if _config_src.exists() and (not _config_dst.exists() or _config_src.stat().st_mtime > _config_dst.stat().st_mtime):
+    _config_dst.parent.mkdir(exist_ok=True)
+    shutil.copy2(_config_src, _config_dst)
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -90,12 +99,24 @@ def show_login_page():
     """Показать форму входа. Вызывается если check_auth() == None."""
     # Минимальный CSS для страницы входа
     st.markdown("""<style>
-        .stApp { background: #08080e !important; }
+        :root { --primary-color: #00ff6a; --background-color: #08080e;
+                --secondary-background-color: #0e0e16; --text-color: #ffffff; }
+        .stApp { background: #08080e !important; color: #fff !important; }
+        .stApp * { color: #fff; }
+        #MainMenu, footer, header { visibility: hidden; }
         [data-testid="stForm"] {
             background: #0e0e16;
             border: 1px solid rgba(0,255,106,0.1);
             border-radius: 16px; padding: 36px;
             max-width: 400px; margin: 70px auto;
+        }
+        [data-testid="stForm"] input { color: #fff !important; background: #12121e !important; }
+        [data-testid="stForm"] label { color: #888 !important; }
+        .stButton button { color: #000 !important; }
+        @media (max-width: 768px) {
+            [data-testid="stForm"] { padding: 24px 18px; margin: 30px 12px; max-width: 100%; border-radius: 12px; }
+            .block-container { padding: 0.5rem 0.5rem !important; }
+            section[data-testid="stSidebar"] { display: none !important; }
         }
     </style>""", unsafe_allow_html=True)
 
@@ -103,16 +124,19 @@ def show_login_page():
     with col2:
         st.markdown("""
         <div style="text-align:center; margin-bottom: 10px;">
-            <span style="font-size: 3rem;">🍽️</span>
-            <h2 style="color: #e0e0e8; margin: 10px 0 5px;">R-Keeper AI</h2>
-            <p style="color: #7070888; font-size: 0.9rem;">Аналитика сети столовых МГУ</p>
+            <div style="width:48px; height:48px; border-radius:14px; background:linear-gradient(135deg,#00ff6a,#00cc55);
+                 display:inline-flex; align-items:center; justify-content:center; margin-bottom:12px;">
+                <span style="font-size:1.4rem; font-weight:900; color:#000; font-family:Inter,sans-serif;">R</span>
+            </div>
+            <h2 style="color: #e0e0e8; margin: 8px 0 4px; font-weight:700; letter-spacing:-.02em;">R-Keeper AI</h2>
+            <p style="color: #555568; font-size: 0.78rem;">Аналитика · МГУ</p>
         </div>
         """, unsafe_allow_html=True)
 
         with st.form("login_form"):
             username = st.text_input("Логин", placeholder="Введите логин")
             password = st.text_input("Пароль", type="password", placeholder="Введите пароль")
-            submitted = st.form_submit_button("🔐 Войти", use_container_width=True)
+            submitted = st.form_submit_button("Войти", use_container_width=True)
 
             if submitted:
                 if not username or not password:
@@ -123,7 +147,7 @@ def show_login_page():
                         st.session_state["_auth_user"] = user
                         st.rerun()
                     else:
-                        st.error("❌ Неверный логин или пароль")
+                        st.error("Неверный логин или пароль")
 
         st.markdown("""
         <div style="text-align:center; margin-top: 20px; color: #555; font-size: 0.75rem;">
@@ -144,7 +168,7 @@ def get_connection():
             login_timeout=DB_CONFIG["login_timeout"],
             timeout=DB_CONFIG["timeout"], charset="UTF-8")
     except Exception as e:
-        st.error(f"❌ Ошибка подключения: {e}")
+        st.error(f"Ошибка подключения: {e}")
         return None
 
 def run_query(query, params=None):
@@ -167,9 +191,9 @@ def run_query_safe(query):
     forbidden = ["INSERT","UPDATE","DELETE","DROP","ALTER","CREATE","TRUNCATE","EXEC","EXECUTE","GRANT","REVOKE"]
     first_word = q.split()[0].upper() if q else ""
     if first_word not in ("SELECT","WITH"):
-        return None, "⛔ Разрешены только SELECT"
+        return None, "Разрешены только SELECT"
     for w in forbidden:
-        if w in q.upper().split(): return None, f"⛔ Запрещено: {w}"
+        if w in q.upper().split(): return None, f"Запрещено: {w}"
     try:
         conn = get_connection()
         if conn is None: return None, "Нет подключения"
@@ -425,13 +449,32 @@ if check_auth() is None:
     show_login_page()
     st.stop()
 
-# Текущий пользователь (доступен везде)
 CURRENT_USER = check_auth()
 
 # Тема: светлая/тёмная
+# Тема: светлая/тёмная — сохраняется в URL query params
+_theme_from_url = st.query_params.get("theme", "")
 if "_theme" not in st.session_state:
-    st.session_state["_theme"] = "dark"
+    st.session_state["_theme"] = _theme_from_url if _theme_from_url in ("light", "dark") else "dark"
 IS_LIGHT = st.session_state["_theme"] == "light"
+
+# Dynamically override Streamlit's internal theme (affects dataframe, status widget etc)
+import streamlit.config as _stconfig
+if IS_LIGHT:
+    _stconfig.set_option("theme.base", "light")
+    _stconfig.set_option("theme.backgroundColor", "#f5f5f8")
+    _stconfig.set_option("theme.secondaryBackgroundColor", "#eeeef2")
+    _stconfig.set_option("theme.textColor", "#1a1a2e")
+    _stconfig.set_option("theme.primaryColor", "#00b847")
+else:
+    _stconfig.set_option("theme.base", "dark")
+    _stconfig.set_option("theme.backgroundColor", "#08080e")
+    _stconfig.set_option("theme.secondaryBackgroundColor", "#0e0e16")
+    _stconfig.set_option("theme.textColor", "#ffffff")
+    _stconfig.set_option("theme.primaryColor", "#00ff6a")
+
+# === VIEWPORT META (critical for mobile) ===
+st.markdown("""<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">""", unsafe_allow_html=True)
 
 st.markdown("""<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
@@ -441,12 +484,26 @@ st.markdown("""<style>
     --border:rgba(255,255,255,0.04); --border-h:rgba(0,255,106,0.2);
     --t1:#fff; --t2:#7a7a92; --t3:#44445a;
     --green:#00ff6a; --lime:#c8ff00; --yellow:#ffe600; --pink:#ff0090; --purple:#8b5cf6;
+    /* Override Streamlit internal theme vars for dark mode */
+    --primary-color: #00ff6a; --background-color: #08080e;
+    --secondary-background-color: #0e0e16; --text-color: #ffffff;
 }
 
 /* === BASE === */
 .stApp { background: var(--bg) !important; color: var(--t1); font-family: 'Inter', sans-serif; }
-#MainMenu, footer, header { visibility: hidden; }
-.stDeployButton { display: none; }
+#MainMenu, footer { visibility: hidden; }
+header[data-testid="stHeader"] { visibility: hidden; }
+/* Keep native sidebar expand/collapse buttons VISIBLE despite header hidden */
+[data-testid="stExpandSidebarButton"],
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapseButton"] button {
+    visibility: visible !important;
+}
+/* Also make expand button's parent wrappers visible (visibility doesn't inherit to visible children, but layout needs it) */
+header[data-testid="stHeader"] [data-testid="stToolbar"] { visibility: visible !important; pointer-events: none; }
+header[data-testid="stHeader"] [data-testid="stToolbar"] [data-testid="stExpandSidebarButton"] { pointer-events: auto; }
+.stDeployButton { display: none !important; visibility: hidden !important; }
+.stAppToolbar > *:not(:has([data-testid="stExpandSidebarButton"])) { visibility: hidden !important; }
 .block-container { padding: 1.2rem 1.5rem 1.5rem; max-width: 100%; }
 
 /* === SIDEBAR === */
@@ -465,7 +522,7 @@ section[data-testid="stSidebar"] .stRadio label[data-checked="true"] {
 /* === METRIC CARDS (JUICE style) === */
 [data-testid="stMetric"] {
     background: var(--card); border: 1px solid var(--border);
-    border-radius: 14px; padding: 14px 14px;
+    border-radius: 14px; padding: 18px 20px;
     transition: all .25s; position: relative; overflow: hidden;
 }
 [data-testid="stMetric"]::after {
@@ -477,13 +534,13 @@ section[data-testid="stSidebar"] .stRadio label[data-checked="true"] {
     box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 0 20px rgba(0,255,106,.03);
 }
 [data-testid="stMetricValue"] {
-    font-size: 1.35rem !important; font-weight: 800; color: #fff;
+    font-size: clamp(1.15rem, 1.6vw, 1.85rem) !important; font-weight: 800; color: #fff;
     letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.1;
     white-space: nowrap; overflow: visible;
 }
 [data-testid="stMetricLabel"] {
-    font-size: .55rem; color: var(--t3);
-    text-transform: uppercase; letter-spacing: .1em; font-weight: 700; margin-bottom: 4px;
+    font-size: .62rem; color: var(--t3);
+    text-transform: uppercase; letter-spacing: .1em; font-weight: 700; margin-bottom: 6px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 [data-testid="stMetricDelta"] {
@@ -505,11 +562,11 @@ div[data-testid="stHorizontalBlock"] > div:nth-child(6) [data-testid="stMetric"]
 div[data-testid="stHorizontalBlock"] { gap: 8px !important; }
 
 /* === TYPOGRAPHY === */
-h1 { color:#fff !important; font-weight:800 !important; font-size:1.35rem !important; letter-spacing:-.03em !important; margin-bottom:0 !important; }
-h2 { color:#fff !important; font-weight:700 !important; font-size:1.15rem !important; letter-spacing:-.02em !important; }
-h3 { color:#fff !important; font-weight:600 !important; font-size:.95rem !important; }
-h4 { color:var(--t2) !important; font-weight:500 !important; font-size:.85rem !important; }
-p, li { color: var(--t2); font-size: .82rem; line-height: 1.5; }
+h1 { color:#fff !important; font-weight:800 !important; font-size:1.7rem !important; letter-spacing:-.03em !important; margin-bottom:4px !important; }
+h2 { color:#fff !important; font-weight:700 !important; font-size:1.35rem !important; letter-spacing:-.02em !important; }
+h3 { color:#fff !important; font-weight:700 !important; font-size:1.2rem !important; letter-spacing:-.02em !important; margin-bottom:2px !important; }
+h4 { color:var(--t2) !important; font-weight:500 !important; font-size:.92rem !important; }
+p, li { color: var(--t2); font-size: .84rem; line-height: 1.5; }
 strong { color: #fff; font-weight: 600; }
 
 /* === TABS === */
@@ -544,10 +601,16 @@ div[data-testid="stExpander"]:hover { border-color:rgba(0,255,106,.1); }
 
 /* === INPUTS === */
 .stSelectbox > div > div, .stMultiSelect > div > div { background:var(--card) !important; border-color:var(--border) !important; border-radius:10px !important; }
+/* Dark mode: override light config text colors */
+[data-baseweb="select"] span, [data-baseweb="select"] div,
+.stSelectbox span, .stMultiSelect span { color: #fff !important; }
+.stSelectbox label, .stMultiSelect label, .stTextInput label,
+.stDateInput label, .stNumberInput label, .stTextArea label { color: var(--t2) !important; }
 .stTextInput > div > div > input, .stTextArea > div > div > textarea {
     background:var(--card) !important; border-color:var(--border) !important; border-radius:10px !important; color:#fff !important;
 }
 .stTextInput > div > div > input:focus { border-color:var(--green) !important; box-shadow:0 0 0 1px var(--green),0 0 15px rgba(0,255,106,.08) !important; }
+.stDateInput input { color: #fff !important; background: var(--card) !important; }
 
 /* === RADIO (horizontal) === */
 .stRadio > div { gap:6px; }
@@ -559,6 +622,12 @@ div[data-testid="stExpander"]:hover { border-color:rgba(0,255,106,.1); }
 .stChatMessage { background:var(--card) !important; border:1px solid var(--border); border-radius:12px; }
 .stChatInputContainer > div { background:var(--card); border-color:var(--border); border-radius:12px; }
 .stChatInputContainer > div:focus-within { border-color:var(--green); box-shadow:0 0 15px rgba(0,255,106,.06); }
+/* Bottom fixed container for chat_input */
+[data-testid="stBottom"], [data-testid="stBottom"] > div,
+[data-testid="stBottomBlockContainer"], [data-testid="stBottomBlockContainer"] > div,
+.stChatFloatingInputContainer, [data-testid="stChatInput"] {
+    background: var(--bg) !important;
+}
 
 /* === DIVIDER === */
 hr { border:none !important; height:1px !important; background:var(--border) !important; margin:.8rem 0 !important; }
@@ -577,6 +646,9 @@ hr { border:none !important; height:1px !important; background:var(--border) !im
 
 /* === PLOTLY === */
 .js-plotly-plot { border-radius:12px; }
+.js-plotly-plot .plotly .modebar { opacity: 0 !important; transition: opacity .2s; pointer-events: none; }
+.js-plotly-plot:hover .plotly .modebar { opacity: 1 !important; pointer-events: auto; }
+.js-plotly-plot .plotly .modebar-group { background: transparent !important; }
 
 /* === LINKS === */
 a { color:var(--green); text-decoration:none; }
@@ -600,76 +672,430 @@ tr:hover { background:rgba(0,255,106,.02); }
 .badge-warning { background:rgba(255,230,0,.1); color:#ffe600; padding:3px 10px; border-radius:12px; font-size:.68rem; font-weight:700; }
 .badge-error { background:rgba(255,71,87,.1); color:#ff4757; padding:3px 10px; border-radius:12px; font-size:.68rem; font-weight:700; }
 
-/* === RUSSIAN LOADING TEXT === */
-[data-testid="stStatusWidget"] div { visibility: hidden; position: relative; }
-[data-testid="stStatusWidget"] div::after {
-    content: "⏳ Загрузка данных..."; visibility: visible;
-    position: absolute; top: 0; left: 0;
-    font-size: .8rem; color: var(--t2); font-weight: 500;
+/* === LOADING === */
+/* Hide the "Running func()" status widget with maximum specificity */
+.stApp .stStatusWidget,
+.stApp [data-testid="stStatusWidget"],
+.stApp .stStatusWidget[data-testid="stStatusWidget"],
+div.stStatusWidget,
+[data-testid="stStatusWidget"].stStatusWidget { display: none !important; visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
+[data-testid="stAppRunningIndicator"] { display: none !important; }
+
+/* Streamlit spinner styling — shows in-place where data loads */
+.stSpinner > div { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; }
+.stSpinner > div > div:first-child {
+    border-color: rgba(0,255,106,.15) !important;
+    border-top-color: var(--green) !important;
+    width: 28px !important; height: 28px !important;
+}
+.stSpinner > div > div:last-child {
+    color: var(--t2) !important; font-size: .78rem; font-weight: 500;
+}
+
+/* Notification overlays */
+.stApp [data-testid="stNotification"],
+[data-testid="stNotificationContentInfo"],
+div[data-testid="stMarkdownContainer"] + div[style*="position: fixed"] {
+    background: var(--card) !important; color: var(--t1) !important;
+    border: 1px solid var(--border) !important; border-radius: 12px !important;
+}
+
+/* ================================================================
+   MOBILE / ADAPTIVE
+   ================================================================ */
+
+@media (max-width: 768px) {
+
+    /* --- Make header visible but only show the sidebar expand button --- */
+    header[data-testid="stHeader"] {
+        visibility: visible !important;
+        background: transparent !important;
+        pointer-events: none;
+    }
+    header[data-testid="stHeader"] * { visibility: hidden; }
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="stExpandSidebarButton"] * {
+        visibility: visible !important; pointer-events: auto !important;
+    }
+
+    /* --- Restyle expand button as hamburger --- */
+    [data-testid="stExpandSidebarButton"] {
+        width: 44px !important; height: 44px !important;
+        background: var(--card) !important; border: 1px solid var(--border) !important;
+        border-radius: 12px !important; cursor: pointer;
+        box-shadow: 0 4px 20px rgba(0,0,0,.4);
+        display: flex !important; align-items: center; justify-content: center;
+        padding: 0 !important; transition: all .2s;
+        color: var(--green) !important;
+    }
+    [data-testid="stExpandSidebarButton"]:hover {
+        border-color: var(--border-h) !important;
+        box-shadow: 0 4px 25px rgba(0,0,0,.5), 0 0 15px rgba(0,255,106,.08);
+    }
+    [data-testid="stExpandSidebarButton"] span {
+        color: var(--green) !important; font-size: 22px !important;
+    }
+
+    /* Sidebar as mobile overlay */
+    section[data-testid="stSidebar"] {
+        z-index: 999998 !important;
+        min-width: 280px !important; max-width: 85vw !important;
+        box-shadow: 4px 0 30px rgba(0,0,0,.6);
+    }
+
+    /* Container — less padding, room for hamburger */
+    .block-container {
+        padding: 60px 10px 16px 10px !important; max-width: 100% !important;
+    }
+
+    /* Columns stack vertically */
+    div[data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important; gap: 6px !important;
+    }
+    div[data-testid="stHorizontalBlock"] > div {
+        flex: 1 1 100% !important; min-width: 0 !important; max-width: 100% !important;
+    }
+    /* Allow 2-column for small pairs (metrics row) */
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+        flex: 1 1 calc(50% - 4px) !important; min-width: calc(50% - 4px) !important;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        padding: 12px 14px !important; border-radius: 10px;
+    }
+    [data-testid="stMetricValue"] { font-size: 1.3rem !important; }
+    [data-testid="stMetricLabel"] { font-size: .52rem !important; }
+
+    /* Typography */
+    h1 { font-size: 1.3rem !important; }
+    h2 { font-size: 1.1rem !important; }
+    h3 { font-size: 1rem !important; }
+    p, li { font-size: .78rem !important; }
+
+    /* Tabs — scrollable */
+    .stTabs [data-baseweb="tab-list"] {
+        overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; padding: 2px;
+    }
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display: none; }
+    .stTabs [data-baseweb="tab"] {
+        white-space: nowrap; flex-shrink: 0;
+        font-size: .72rem !important; padding: 6px 10px;
+    }
+
+    /* Plotly charts responsive */
+    .js-plotly-plot, .plotly { width: 100% !important; }
+    .js-plotly-plot .plotly .main-svg { width: 100% !important; }
+
+    /* Tables scroll */
+    .stDataFrame { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { font-size: .72rem !important; }
+    td, th { padding: 5px 8px !important; font-size: .72rem !important; }
+
+    /* Expanders */
+    div[data-testid="stExpander"] { border-radius: 10px; }
+    div[data-testid="stExpander"] summary { font-size: .8rem !important; }
+
+    /* Buttons */
+    .stButton > button { font-size: .75rem !important; padding: .4rem .7rem; }
+    .stDownloadButton > button { font-size: .75rem !important; }
+
+    /* Selectbox / inputs */
+    .stSelectbox, .stMultiSelect, .stDateInput { font-size: .78rem !important; }
+
+    /* Glass cards */
+    .glass-card { padding: 12px 14px !important; border-radius: 10px; }
+
+    /* Chat */
+    .stChatMessage { font-size: .8rem !important; }
+}
+
+/* --- Tablet (768-1024) --- */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .block-container { padding: 1rem 1rem 1.5rem !important; }
+    div[data-testid="stHorizontalBlock"] { gap: 6px !important; }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+        min-width: calc(33% - 4px) !important;
+    }
+    [data-testid="stMetricValue"] { font-size: 1.5rem !important; }
 }
 </style>""", unsafe_allow_html=True)
 
 # === LIGHT THEME OVERRIDES ===
 if IS_LIGHT:
     st.markdown("""<style>
-    :root { --bg:#f5f5f8; --bg2:#eeeef2; --card:#ffffff; --border:rgba(0,0,0,0.08);
+    /* === NUCLEAR OVERRIDE: Force Streamlit internal theme vars to light === */
+    :root, [data-testid="stAppViewContainer"], .stApp {
+        --bg:#f5f5f8; --bg2:#eeeef2; --card:#ffffff; --border:rgba(0,0,0,0.08);
         --border-h:rgba(0,180,80,0.3); --t1:#1a1a2e; --t2:#5a5a70; --t3:#9a9ab0;
-        --green:#00b847; --lime:#7ab800; --yellow:#cc9900; --pink:#cc0070; --purple:#6b3fc6; }
-    .stApp { background: var(--bg) !important; color: var(--t1); }
+        --green:#00b847; --lime:#7ab800; --yellow:#cc9900; --pink:#cc0070; --purple:#6b3fc6;
+        /* Override Streamlit's internal vars from config.toml */
+        --primary-color: #00b847 !important;
+        --background-color: #f5f5f8 !important;
+        --secondary-background-color: #eeeef2 !important;
+        --text-color: #1a1a2e !important;
+        color: #1a1a2e !important;
+    }
+    /* Force ALL text inside app to dark */
+    .stApp, .stApp * { color: inherit; }
+    .stApp [data-baseweb] { color: #1a1a2e; }
+    .stApp label, .stApp span, .stApp p, .stApp div { color: inherit; }
+    /* Specific Streamlit widget text overrides */
+    [data-baseweb="select"] span,
+    [data-baseweb="select"] div,
+    [data-baseweb="input"] input,
+    [data-baseweb="textarea"] textarea,
+    .stSelectbox span,
+    .stMultiSelect span,
+    .stTextInput input,
+    .stNumberInput input,
+    .stTextArea textarea,
+    .stDateInput input,
+    [data-testid="stMarkdownContainer"],
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stCaptionContainer"] {
+        color: #1a1a2e !important;
+    }
+    /* Download button text */
+    .stDownloadButton button span { color: var(--green) !important; }
+
+    /* === BASE === */
+    .stApp { background: var(--bg) !important; }
+    header[data-testid="stHeader"] { background: transparent !important; }
+
+    /* === SIDEBAR === */
     section[data-testid="stSidebar"] { background: var(--bg2); border-right: 1px solid var(--border); }
     section[data-testid="stSidebar"] .stRadio label { color: var(--t2); }
     section[data-testid="stSidebar"] .stRadio label:hover { background: rgba(0,180,80,.05); color: var(--t1); }
     section[data-testid="stSidebar"] .stRadio label[data-checked="true"] {
         background: rgba(0,180,80,.08); color: var(--green); border-left-color: var(--green); }
+    section[data-testid="stSidebar"] .stSelectbox > div > div,
+    section[data-testid="stSidebar"] .stMultiSelect > div > div {
+        background: #fff !important; border-color: var(--border) !important; color: var(--t1) !important; }
+    /* Sidebar buttons (theme toggle, logout) */
+    section[data-testid="stSidebar"] .stButton > button {
+        background: var(--card) !important; border-color: var(--border) !important; color: var(--t1) !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        border-color: var(--border-h) !important; background: rgba(0,180,80,.04) !important;
+    }
+
+    /* === METRICS === */
     [data-testid="stMetric"] { background: var(--card); border-color: var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-    [data-testid="stMetric"]:hover { border-color: var(--border-h); box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+    [data-testid="stMetric"]:hover { border-color: var(--border-h); box-shadow: 0 4px 12px rgba(0,0,0,.08); transform: translateY(-1px); }
     [data-testid="stMetric"]::after { background: linear-gradient(90deg, transparent 10%, rgba(0,180,80,.3) 50%, transparent 90%); }
-    [data-testid="stMetricValue"] { color: var(--t1); }
+    [data-testid="stMetricValue"] { color: var(--t1) !important; }
     [data-testid="stMetricLabel"] { color: var(--t3); }
     [data-testid="stMetricDelta"] { background: rgba(0,180,80,.08); }
-    h1,h2,h3 { color: var(--t1) !important; }
+
+    /* === TYPOGRAPHY === */
+    h1, h2, h3 { color: var(--t1) !important; }
     h4 { color: var(--t2) !important; }
     p, li { color: var(--t2); }
     strong { color: var(--t1); }
+    .stCaption, [data-testid="stCaptionContainer"] { color: var(--t3) !important; }
+
+    /* === TABS === */
     .stTabs [data-baseweb="tab-list"] { background: var(--card); border-color: var(--border); }
     .stTabs [data-baseweb="tab"] { color: var(--t3); }
     .stTabs [aria-selected="true"] { color: var(--green) !important; background: rgba(0,180,80,.06) !important; }
-    .stDataFrame { border-color: var(--border); }
+
+    /* === INPUTS === */
+    .stSelectbox > div > div, .stMultiSelect > div > div {
+        background: var(--card) !important; border-color: var(--border) !important; color: var(--t1) !important; }
+    .stSelectbox [data-baseweb="select"] span { color: var(--t1) !important; }
+    .stTextInput > div > div > input, .stTextArea > div > div > textarea {
+        background: var(--card) !important; border-color: var(--border) !important; color: var(--t1) !important; }
+    .stTextInput > div > div > input:focus { border-color: var(--green) !important; box-shadow: 0 0 0 1px var(--green) !important; }
+    .stDateInput > div > div > input { background: var(--card) !important; color: var(--t1) !important; }
+    .stRadio label { color: var(--t2) !important; }
+    .stRadio label[data-checked="true"] { background: rgba(0,180,80,.06); border-color: rgba(0,180,80,.2); color: var(--green) !important; }
+
+    /* === BUTTONS === */
     .stButton > button { background: var(--card); border-color: var(--border); color: var(--t1); }
-    .stButton > button:hover { border-color: var(--border-h); }
-    div[data-testid="stExpander"] { background: var(--card); border-color: var(--border); }
-    .stSelectbox > div > div { background: var(--card) !important; border-color: var(--border) !important; }
-    .stTextInput > div > div > input { background: var(--card) !important; border-color: var(--border) !important; color: var(--t1) !important; }
-    hr { background: var(--border) !important; }
-    .stCaption { color: var(--t3) !important; }
-    .stChatMessage { background: var(--card) !important; border-color: var(--border); }
+    .stButton > button:hover { border-color: var(--border-h); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+    .stButton > button[kind="primary"] { background: linear-gradient(135deg, #00b847, #009938); color: #fff; border: none; }
+    .stDownloadButton > button { background: var(--card); border-color: rgba(0,180,80,.15); color: var(--green); }
+    .stDownloadButton > button:hover { background: rgba(0,180,80,.04); }
+
+    /* === TABLES === */
+    .stDataFrame { border-color: var(--border); }
     table th { background: rgba(0,180,80,.04); color: var(--t1); }
-    table td,th { border-color: var(--border); }
+    table td, th { border-color: var(--border); color: var(--t2); }
+    tr:hover { background: rgba(0,180,80,.02); }
+
+    /* === EXPANDER === */
+    div[data-testid="stExpander"] { background: var(--card); border-color: var(--border); }
+    div[data-testid="stExpander"]:hover { border-color: rgba(0,180,80,.15); }
+
+    /* === CHAT === */
+    .stChatMessage { background: var(--card) !important; border: 1px solid var(--border); }
+    .stChatInputContainer > div { background: var(--card) !important; border-color: var(--border) !important; }
+    .stChatInputContainer > div:focus-within { border-color: var(--green) !important; }
+    .stChatInputContainer textarea { color: var(--t1) !important; background: transparent !important; }
+    /* Fix dark chat bar at bottom — all possible selectors */
+    [data-testid="stBottom"],
+    [data-testid="stBottom"] > div,
+    [data-testid="stBottomBlockContainer"],
+    [data-testid="stBottomBlockContainer"] > div,
+    .stChatFloatingInputContainer,
+    [data-testid="stChatInput"],
+    .stBottom > div {
+        background: var(--bg) !important;
+    }
+    .stChatInputContainer { background: transparent !important; }
+    .stChatInputContainer > div > div { background: var(--card) !important; }
+    [data-testid="stChatInput"] > div { background: var(--card) !important; border-color: var(--border) !important; border-radius: 12px; }
+    [data-testid="stChatInput"] textarea { color: var(--t1) !important; }
+
+    /* === DIVIDERS / LINKS / CODE === */
+    hr { background: var(--border) !important; }
     a { color: var(--green); }
+    a:hover { color: #009938; }
     code { background: rgba(0,180,80,.06); color: var(--green); }
     ::-webkit-scrollbar-thumb { background: rgba(0,180,80,.15); }
     .glass-card { background: var(--card); border-color: var(--border); }
-    .stRadio label[data-checked="true"] { background: rgba(0,180,80,.06); border-color: rgba(0,180,80,.2); color: var(--green); }
+
+    /* === ALERTS === */
+    .stAlert { border-radius: 12px; }
+
+    /* === SPINNER === */
+    .stSpinner > div > div:first-child { border-color: rgba(0,180,80,.15) !important; border-top-color: var(--green) !important; }
+    .stSpinner > div > div:last-child { color: var(--t2) !important; }
+
+    /* Running overlay */
+    .stApp [data-testid="stNotification"],
+    [data-testid="stNotificationContentInfo"] {
+        background: var(--card) !important; color: var(--t1) !important;
+        border-color: var(--border) !important;
+    }
+    [data-testid="stNotificationContentInfo"] code { background: rgba(0,180,80,.08) !important; color: var(--green) !important; }
+
+    /* Dataframe dark fix */
+    .stDataFrame, .stDataFrame > div, [data-testid="stDataFrame"] > div > div {
+        background: var(--card) !important;
+    }
+    .stDataFrame iframe { background: var(--card) !important; }
+
+    /* === PLOTLY === */
+    .js-plotly-plot .plotly .gridlayer line { stroke: rgba(0,0,0,.06) !important; }
+    .js-plotly-plot .plotly .zerolinelayer line { stroke: rgba(0,0,0,.1) !important; }
+    /* Modebar (chart toolbar) */
+    /* Plotly modebar - hidden by default, visible on chart hover */
+    .js-plotly-plot .plotly .modebar { opacity: 0 !important; transition: opacity .2s; pointer-events: none; background: rgba(255,255,255,.95) !important; border-radius: 8px; }
+    .js-plotly-plot:hover .plotly .modebar { opacity: 1 !important; pointer-events: auto; }
+    .js-plotly-plot .plotly .modebar-group { background: transparent !important; }
+    .js-plotly-plot .plotly .modebar-btn path { fill: #5a5a70 !important; }
+    .js-plotly-plot .plotly .modebar-btn:hover path { fill: var(--green) !important; }
+
+    /* === DATAFRAME (glide-data-grid, config.toml base=dark workaround) === */
+    .stDataFrame, .stDataFrame > div, [data-testid="stDataFrame"],
+    [data-testid="stDataFrame"] > div, [data-testid="stDataFrame"] > div > div {
+        background: var(--card) !important; color: var(--t1) !important;
+    }
+    .stDataFrame iframe { background: var(--card) !important; color-scheme: light !important; }
+    /* Override glide-data-grid dark cells */
+    [data-testid="stDataFrame"] [data-testid="glideDataEditor"] {
+        --gdg-bg-cell: #ffffff !important;
+        --gdg-bg-header: #f8f8fa !important;
+        --gdg-bg-header-has: #f0f0f4 !important;
+        --gdg-text-dark: #1a1a2e !important;
+        --gdg-text-medium: #5a5a70 !important;
+        --gdg-text-light: #9a9ab0 !important;
+        --gdg-border-color: rgba(0,0,0,.08) !important;
+        --gdg-bg-cell-medium: #fafafa !important;
+        --gdg-link-color: #00b847 !important;
+    }
+
+    /* === STATUS WIDGET / RUNNING OVERLAY === */
+    .stApp .stStatusWidget,
+    .stApp [data-testid="stStatusWidget"],
+    .stApp .stStatusWidget[data-testid="stStatusWidget"],
+    div.stStatusWidget,
+    [data-testid="stStatusWidget"].stStatusWidget,
+    [data-testid="stStatusWidget"] > div {
+        display: none !important; visibility: hidden !important; height: 0 !important; overflow: hidden !important;
+    }
+
+    /* === TABLE (st.table HTML) === */
+    table { background: var(--card); }
+    table td { color: var(--t2); }
+
+    /* === WARNINGS / ALERTS === */
+    .stAlert > div { color: var(--t1) !important; }
+
+    /* === Mobile expand button === */
+    [data-testid="stExpandSidebarButton"] {
+        background: #ffffff !important; border-color: rgba(0,0,0,.1) !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,.12) !important;
+    }
+    [data-testid="stExpandSidebarButton"] span { color: var(--green) !important; }
+
+    /* === Accent borders for light theme === */
+    div[data-testid="stHorizontalBlock"] > div:nth-child(1) [data-testid="stMetric"] { border-top-color: var(--green); }
+    div[data-testid="stHorizontalBlock"] > div:nth-child(2) [data-testid="stMetric"] { border-top-color: var(--lime); }
+    div[data-testid="stHorizontalBlock"] > div:nth-child(3) [data-testid="stMetric"] { border-top-color: var(--yellow); }
+    div[data-testid="stHorizontalBlock"] > div:nth-child(4) [data-testid="stMetric"] { border-top-color: var(--pink); }
+    div[data-testid="stHorizontalBlock"] > div:nth-child(5) [data-testid="stMetric"] { border-top-color: var(--purple); }
+    div[data-testid="stHorizontalBlock"] > div:nth-child(6) [data-testid="stMetric"] { border-top-color: #0891b2; }
     </style>""", unsafe_allow_html=True)
+
+# === JS FIX: Restyle stStatusWidget — Russian text, theme-aware colors ===
+import streamlit.components.v1 as _components
+_is_light_js = "true" if IS_LIGHT else "false"
+_components.html(f"""<script>
+(function(){{
+    const doc = window.parent.document;
+    const isLight = {_is_light_js};
+    const bg = isLight ? '#ffffff' : '#0e0e16';
+    const border = isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.06)';
+    const textColor = isLight ? '#5a5a70' : '#7a7a92';
+    const codeColor = isLight ? '#00b847' : '#00ff6a';
+    const codeBg = isLight ? 'rgba(0,180,80,0.08)' : 'rgba(0,255,106,0.08)';
+
+    function fixStatus() {{
+        doc.querySelectorAll('[data-testid="stStatusWidget"], .stStatusWidget').forEach(el => {{
+            el.style.cssText = `background:${{bg}}!important;border:1px solid ${{border}}!important;border-radius:12px!important;box-shadow:0 4px 20px rgba(0,0,0,0.1)!important;overflow:hidden!important;`;
+            // Fix inner elements
+            el.querySelectorAll('div,span,label').forEach(c => {{
+                c.style.setProperty('color', textColor, 'important');
+                c.style.setProperty('background', 'transparent', 'important');
+            }});
+            el.querySelectorAll('code').forEach(c => {{
+                c.style.cssText = `color:${{codeColor}}!important;background:${{codeBg}}!important;border-radius:4px;padding:1px 5px;`;
+            }});
+            // Replace "Running" with Russian
+            el.querySelectorAll('span,label').forEach(s => {{
+                if (s.textContent.trim() === 'Running') s.textContent = 'Загрузка';
+            }});
+        }});
+    }}
+    fixStatus();
+    new MutationObserver(fixStatus).observe(doc.body, {{childList:true, subtree:true}});
+}})();
+</script>""", height=0)
 
 with st.sidebar:
     # --- Пользователь + тема ---
     u_col, theme_col, logout_col = st.columns([3, 1, 1])
     with u_col:
-        st.markdown(f"👤 **{CURRENT_USER['name']}**")
+        st.markdown(f"**{CURRENT_USER['name']}**")
     with theme_col:
         theme_icon = "☀️" if IS_LIGHT else "🌙"
         if st.button(theme_icon, key="theme_btn", help="Светлая/тёмная тема"):
-            st.session_state["_theme"] = "light" if st.session_state["_theme"] == "dark" else "dark"
+            new_theme = "light" if st.session_state["_theme"] == "dark" else "dark"
+            st.session_state["_theme"] = new_theme
+            st.query_params["theme"] = new_theme
             st.rerun()
     with logout_col:
-        if st.button("🚪", key="logout_btn", help="Выйти"):
+        if st.button("↗", key="logout_btn", help="Выйти"):
             st.session_state.pop("_auth_user", None)
             st.rerun()
-    st.markdown("## 🍽️ R-Keeper AI")
-    st.caption("Аналитика сети столовых МГУ")
+    st.markdown("## R-Keeper AI")
+    st.caption("Аналитика · МГУ")
     st.divider()
-    period = st.selectbox("📅 Период", ["Сегодня","Вчера","7 дней","30 дней","90 дней","Произвольный"], index=2)
+    period = st.selectbox("Период", ["Сегодня","Вчера","7 дней","30 дней","90 дней","Произвольный"], index=2)
     today = datetime.now().date()
     if period == "Сегодня": date_from = date_to = today
     elif period == "Вчера": date_from = date_to = today - timedelta(1)
@@ -680,11 +1106,10 @@ with st.sidebar:
         c1,c2 = st.columns(2)
         with c1: date_from = st.date_input("С", today-timedelta(30))
         with c2: date_to = st.date_input("По", today)
-    st.caption(f"📅 {date_from} → {date_to}")
+    st.caption(f"{date_from} → {date_to}")
     st.divider()
 
-st.markdown("# 🍽️ Дашборд сети столовых МГУ")
-st.caption(f"Период: {date_from} — {date_to}")
+st.caption(f"{date_from} — {date_to}")
 conn = get_connection()
 if conn is None: st.stop()
 
@@ -2081,7 +2506,7 @@ def sh_load_purchase_prices(date_from_str, date_to_str, progress_container=None,
         if pb:
             pb.progress((i + 1) / len(rids))
         if st_text:
-            st_text.caption(f"📄 Накладная {i+1}/{len(rids)} (RID={rid}) · {len(all_items)} позиций · {errors} ошибок")
+            st_text.caption(f"Накладная {i+1}/{len(rids)} (RID={rid}) · {len(all_items)} позиций · {errors} ошибок")
         items, item_err = sh_load_gdoc0_items(rid)
         if item_err:
             errors += 1
@@ -2365,7 +2790,7 @@ def sh_load_incoming_full(date_from_str, date_to_str, _progress_container=None, 
         if pb:
             pb.progress((i + 1) / len(rids))
         if st_text:
-            st_text.caption(f"📄 Накладная {i+1}/{len(rids)} (RID={rid}) · {len(all_items)} позиций · {errors} ошибок")
+            st_text.caption(f"Накладная {i+1}/{len(rids)} (RID={rid}) · {len(all_items)} позиций · {errors} ошибок")
 
         params = [{"head": "111", "original": ["1"], "values": [[rid]]}]
         data, call_err = sh_api_call("sh5exec", {"procName": "GDoc0", "Input": params})
@@ -2547,7 +2972,7 @@ def sh_find_gdoc12_rids(cmp_rids, max_docs=50, progress_container=None):
         if pb:
             pb.progress((i + 1) / len(cmp_rids))
         if st_text:
-            st_text.caption(f"🔍 Комплект {i+1}/{len(cmp_rids)} (RID={cmp_rid}) · {len(all_doc_rids)} документов найдено")
+            st_text.caption(f"Комплект {i+1}/{len(cmp_rids)} (RID={cmp_rid}) · {len(all_doc_rids)} документов найдено")
 
         data, err = sh_api_call("sh5exec", {"procName": "FindLinksToCmp",
             "Input": [{"head": "108", "original": ["215\\1"], "values": [[cmp_rid]]}]})
@@ -2597,7 +3022,7 @@ def sh_load_gdoc12_costs(doc_rids, progress_container=None):
         if pb:
             pb.progress((i + 1) / len(doc_rids))
         if st_text:
-            st_text.caption(f"📄 Акт нарезки {i+1}/{len(doc_rids)} (RID={rid}) · {len(all_items)} блюд")
+            st_text.caption(f"Акт нарезки {i+1}/{len(doc_rids)} (RID={rid}) · {len(all_items)} блюд")
 
         data, err = sh_api_call("sh5exec", {"procName": "GDoc12",
             "Input": [{"head": "111", "original": ["1"], "values": [[rid]]}]})
@@ -2780,7 +3205,7 @@ def sh_load_recipe_foodcost(progress_container=None, max_complects=100, max_docs
     Возврат: DataFrame[DISH_NAME, COST_PER_PORTION, TOTAL_PORTIONS, TOTAL_COST, DOC_COUNT, UNIT]"""
 
     if progress_container:
-        progress_container.caption("📦 Загрузка списка комплектов из GoodsTree...")
+        progress_container.caption("Загрузка списка комплектов из GoodsTree...")
 
     # Шаг 1: получить все RidCmp из GoodsTree
     goods, err = sh_load_goods()
@@ -2808,7 +3233,7 @@ def sh_load_recipe_foodcost(progress_container=None, max_complects=100, max_docs
     cmp_sample = unique_cmps[:max_complects]
 
     if progress_container:
-        progress_container.caption(f"🔍 Поиск Актов нарезки для {len(cmp_sample)} комплектов...")
+        progress_container.caption(f"Поиск Актов нарезки для {len(cmp_sample)} комплектов...")
 
     # Шаг 2: найти GDoc12 RID'ы
     sub_progress = progress_container if progress_container else None
@@ -2818,7 +3243,7 @@ def sh_load_recipe_foodcost(progress_container=None, max_complects=100, max_docs
         return pd.DataFrame(), f"Не найдено Актов нарезки для {len(cmp_sample)} комплектов ({find_errors} ошибок)"
 
     if progress_container:
-        progress_container.caption(f"📄 Загрузка {len(doc_rids)} Актов нарезки...")
+        progress_container.caption(f"Загрузка {len(doc_rids)} Актов нарезки...")
 
     # Шаг 3: загрузить себестоимость
     costs_df, costs_err = sh_load_gdoc12_costs(doc_rids, progress_container=sub_progress)
@@ -2832,14 +3257,15 @@ def sh_load_recipe_foodcost(progress_container=None, max_complects=100, max_docs
 # НАВИГАЦИЯ (ленивая загрузка — грузится только выбранная страница)
 # ============================================================
 PAGES_ALL = [
-    "🤖 ИИ-чат", "🔔 Проактив", "📈 Выручка", "📅 Сезонность", "🍕 Блюда", "🏢 Столовые", "🗂️ Категории",
-    "👨‍🍳 Персонал", "💰 Касса", "📊 Цены", "🔤 ABC", "⏱️ Скорость",
-    "🕐 Смены", "⚠️ Проблемы", "❌ Отказы", "📋 Заказы",
-    "📦 Склад", "📄 Накладные", "🍳 Фудкост", "🔀 Фудкост (расчёт)", "🔍 Склад: Схема"
+    "Выручка", "Сезонность", "Блюда", "Столовые", "Категории",
+    "Персонал", "Касса", "Цены", "ABC", "Скорость",
+    "Смены", "Проблемы", "Отказы", "Заказы",
+    "Склад", "Накладные", "Фудкост", "Фудкост (расчёт)", "Склад: Схема",
+    "ИИ-чат", "Проактив"
 ]
 
 # Страницы доступные только admin
-ADMIN_ONLY_PAGES = {"🤖 ИИ-чат", "🔔 Проактив"}
+ADMIN_ONLY_PAGES = {"ИИ-чат", "Проактив"}
 
 # Фильтруем по роли текущего пользователя
 if CURRENT_USER["role"] == "admin":
@@ -2849,9 +3275,14 @@ else:
 
 with st.sidebar:
     st.divider()
-    page = st.radio("📑 Раздел", PAGES, label_visibility="collapsed")
+    # Persist page selection across theme reruns
+    if "_page" not in st.session_state or st.session_state["_page"] not in PAGES:
+        st.session_state["_page"] = PAGES[0]
+    page = st.radio("Раздел", PAGES, index=PAGES.index(st.session_state["_page"]),
+                     label_visibility="collapsed", key="_page_radio")
+    st.session_state["_page"] = page
     st.divider()
-    st.caption(f"Gemini AI · {len(load_restaurants())} точек · 📦 SH")
+    st.caption(f"{len(load_restaurants())} точек · SH · v5.9")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -2861,7 +3292,7 @@ if IS_LIGHT:
         font=dict(family="Inter, sans-serif", color="#5a5a70", size=11),
         title_font=dict(color="#1a1a2e", size=13, family="Inter"),
         hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e0e0e8", font_size=12, font_family="Inter"),
-        colorway=["#00b847","#4caf50","#7ab800","#cc9900","#ff9500","#e65100","#cc0070","#6b3fc6"],
+        colorway=["#00b847","#7ab800","#e65100","#6b3fc6","#0891b2","#cc9900","#cc0070","#3b82f6"],
     )
 else:
     CHART_THEME = dict(
@@ -2871,7 +3302,7 @@ else:
         font=dict(family="Inter, sans-serif", color="#7a7a92", size=11),
         title_font=dict(color="#ffffff", size=13, family="Inter"),
         hoverlabel=dict(bgcolor="#0e0e16", bordercolor="#1a1a28", font_size=12, font_family="Inter"),
-        colorway=["#00ff6a","#5aff8a","#9fff5a","#d4ff00","#ffea00","#ffaa00","#ff6b9d","#ff00aa"],
+        colorway=["#00ff6a","#c8ff00","#ff6b9d","#8b5cf6","#00d4ff","#ffaa00","#ff4d6a","#22d3ee"],
     )
 
 # Русские подписи для осей и подсказок plotly
@@ -2904,17 +3335,35 @@ def page_header(title, icon=""):
     """Заголовок страницы с кнопкой обновления"""
     cl, cr = st.columns([6, 1])
     with cl:
-        st.markdown(f"### {icon} {title}")
+        st.markdown(f"## {title}")
     with cr:
-        refresh = st.button("🔄 Обновить", key=f"refresh_{title}", use_container_width=True)
+        refresh = st.button("Обновить", key=f"refresh_{title}", use_container_width=True)
     if refresh:
         st.cache_data.clear()
         st.rerun()
     return refresh
 
+def fix_bar_hover(fig):
+    """Fix Plotly charts: hover tooltips, pie legends, gridlines for light theme."""
+    for trace in fig.data:
+        if hasattr(trace, 'type') and trace.type == 'bar' and trace.text is not None:
+            if not trace.hovertemplate:
+                trace.hovertemplate = "<b>%{y}</b><br>%{x:,.0f}<extra></extra>" if trace.orientation == 'h' else "<b>%{x}</b><br>%{y:,.0f}<extra></extra>"
+        if hasattr(trace, 'type') and trace.type == 'pie':
+            fig.update_layout(legend=dict(orientation="h", yanchor="top", y=-0.05, font_size=10))
+    # Fix gridlines and axis labels for light theme
+    if IS_LIGHT:
+        fig.update_xaxes(gridcolor="rgba(0,0,0,0.04)", zerolinecolor="rgba(0,0,0,0.06)", gridwidth=0.5,
+                         tickfont=dict(color="#5a5a70"), title_font=dict(color="#5a5a70"))
+        fig.update_yaxes(gridcolor="rgba(0,0,0,0.04)", zerolinecolor="rgba(0,0,0,0.06)", gridwidth=0.5,
+                         tickfont=dict(color="#5a5a70"), title_font=dict(color="#5a5a70"))
+        # Also fix legend text
+        fig.update_layout(legend_font_color="#5a5a70")
+    return fig
+
 # --- ИИ ЧАТ ---
-if page == "🤖 ИИ-чат":
-    page_header("ИИ-чат", "🤖")
+if page == "ИИ-чат":
+    page_header("ИИ-чат")
     st.caption("*«Топ-5 блюд в Столовой 1»  •  «Выручка по столовым за неделю»  •  «Кто больше всех опаздывает?»*")
     if "chat_history" not in st.session_state: st.session_state.chat_history = []
     qcols = st.columns(4)
@@ -2935,10 +3384,10 @@ if page == "🤖 ИИ-чат":
     question = sel_q or user_input
     if question:
         st.session_state.chat_history.append({"role":"user","content":question})
-        with st.spinner("🔍 Генерирую SQL..."):
+        with st.spinner("Генерирую SQL..."):
             raw = generate_sql(question).strip()
         if raw.startswith("Ошибка Gemini") or raw.startswith("Gemini перегружен"):
-            st.session_state.chat_history.append({"role":"assistant","content":f"⚠️ {raw}","sql":None,"dataframe":None})
+            st.session_state.chat_history.append({"role":"assistant","content":f"{raw}","sql":None,"dataframe":None})
             st.rerun()
         sql = raw
         for p in ["```sql","```SQL","```"]: sql = sql.replace(p,"")
@@ -2949,9 +3398,9 @@ if page == "🤖 ИИ-чат":
             if match: sql = match.group(1).strip().rstrip(";").strip()
             else: is_none = True
         if is_none:
-            st.session_state.chat_history.append({"role":"assistant","content":"Не связано с данными ресторана. Данные по складу/остаткам/фудкосту — на страницах 📦📄🍳 дашборда.","sql":None,"dataframe":None})
+            st.session_state.chat_history.append({"role":"assistant","content":"Не связано с данными ресторана. Данные по складу/остаткам/фудкосту — на страницах Склад и Накладные.","sql":None,"dataframe":None})
         else:
-            with st.spinner("⚡ Запрос к базе..."):
+            with st.spinner("Запрос к базе..."):
                 df, err = run_query_safe(sql)
             if err:
                 fix = ask_gemini(f"SQL ошибка: {err}\nЗапрос: {sql}\nСхема: {get_rkeeper_schema()}\nИсправь. ТОЛЬКО SQL.")
@@ -2971,12 +3420,12 @@ if page == "🤖 ИИ-чат":
                     "dataframe": df if df is not None and not df.empty else None})
         st.rerun()
     if st.session_state.chat_history:
-        if st.button("🗑️ Очистить чат", use_container_width=True):
+        if st.button("Очистить чат", use_container_width=True):
             st.session_state.chat_history = []; st.rerun()
 
 # --- ПРОАКТИВНЫЙ АНАЛИЗ ---
-if page == "🔔 Проактив":
-    page_header("Проактивный анализ", "🔔")
+if page == "Проактив":
+    page_header("Проактивный анализ")
     days_in_period = (date_to - date_from).days + 1
     prev_end = date_from - timedelta(days=1)
     prev_start = prev_end - timedelta(days=days_in_period-1)
@@ -3005,10 +3454,10 @@ if page == "🔔 Проактив":
 
         # Метрики с дельтой
         c1,c2,c3,c4 = st.columns(4)
-        with c1: st.metric("💰 Выручка", f"{c_rev:,.0f} ₽", delta=delta_str(pct_rev), delta_color="normal")
-        with c2: st.metric("🧾 Заказов", f"{c_ord:,.0f}", delta=delta_str(pct_ord), delta_color="normal")
-        with c3: st.metric("📊 Ср. чек", f"{c_avg:,.0f} ₽", delta=delta_str(pct_avg), delta_color="normal")
-        with c4: st.metric("👥 Гостей", f"{c_gst:,.0f}", delta=delta_str(pct_gst), delta_color="normal")
+        with c1: st.metric("Выручка", f"{c_rev:,.0f} ₽", delta=delta_str(pct_rev), delta_color="normal")
+        with c2: st.metric("Заказов", f"{c_ord:,.0f}", delta=delta_str(pct_ord), delta_color="normal")
+        with c3: st.metric("Ср. чек", f"{c_avg:,.0f} ₽", delta=delta_str(pct_avg), delta_color="normal")
+        with c4: st.metric("Гостей", f"{c_gst:,.0f}", delta=delta_str(pct_gst), delta_color="normal")
 
         st.divider()
 
@@ -3060,7 +3509,7 @@ if page == "🔔 Проактив":
                         anomalies.append(f"🟡 «{row['DISH']}»: продажи упали на {abs(ch):.0f}% ({pq:.0f} → {cq:.0f})")
 
         # Выводим аномалии
-        st.markdown("### 🚨 Обнаруженные аномалии")
+        st.markdown("### Обнаруженные аномалии")
         if anomalies:
             for a in anomalies:
                 st.markdown(f"**{a}**")
@@ -3075,13 +3524,15 @@ if page == "🔔 Проактив":
                     name="Пред. период", orientation="h", marker_color="rgba(99,102,241,0.4)"))
                 fig.add_trace(go.Bar(y=merged_chart["REST_NAME"], x=merged_chart["REVENUE (сейчас)"],
                     name="Текущий период", orientation="h", marker_color="#00ff6a"))
-                fig.update_layout(title="📊 Сравнение выручки по точкам", barmode="overlay",
+                fig.update_layout(title="Сравнение выручки", barmode="overlay",
                     height=500, **CHART_THEME, legend=dict(orientation="h",y=1.1))
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             # ИИ-рекомендации
             st.divider()
-            st.markdown("### 💡 Рекомендации ИИ")
+            st.markdown("### Рекомендации")
             anomalies_text = "\n".join(anomalies)
             if st.button("🧠 Получить рекомендации от ИИ", use_container_width=True, type="primary"):
                 with st.spinner("🤔 Анализирую и формирую рекомендации..."):
@@ -3093,11 +3544,11 @@ if page == "🔔 Проактив":
         st.warning("Недостаточно данных для сравнения. Выберите период больше 1 дня.")
 
 # --- ВЫРУЧКА ---
-if page == "📈 Выручка":
-    page_header("Выручка", "📈")
+if page == "Выручка":
+    page_header("Выручка")
     orders = load_orders(date_from, date_to)
     if orders.empty:
-        st.warning("⚠️ Нет данных за период")
+        st.warning("Нет данных за период")
     else:
         paid = orders[orders["PAID"]==1] if "PAID" in orders.columns else orders
         rev=float(paid["TOPAYSUM"].sum()); n=len(paid)
@@ -3107,12 +3558,12 @@ if page == "📈 Выручка":
         checks_df = load_check_count(date_from, date_to)
         n_checks = int(checks_df.iloc[0]["CHECKS"]) if not checks_df.empty else n
         c1,c2,c3,c4,c5,c6 = st.columns(6)
-        with c1: st.metric("💰 Выручка",f"{rev:,.0f} ₽")
-        with c2: st.metric("🧾 Заказов",f"{n:,}")
-        with c3: st.metric("🧾 Чеков",f"{n_checks:,}")
-        with c4: st.metric("📊 Ср. чек",f"{avg_c:,.0f} ₽")
-        with c5: st.metric("👥 Гостей",f"{guests:,}")
-        with c6: st.metric("🍽️ Блюд",f"{dishes_n:,}")
+        with c1: st.metric("Выручка",f"{rev:,.0f} ₽")
+        with c2: st.metric("Заказов",f"{n:,}")
+        with c3: st.metric("Чеков",f"{n_checks:,}")
+        with c4: st.metric("Ср. чек",f"{avg_c:,.0f} ₽")
+        with c5: st.metric("Гостей",f"{guests:,}")
+        with c6: st.metric("Блюд",f"{dishes_n:,}")
         st.divider()
         cl,cr = st.columns([2,1])
         with cl:
@@ -3123,7 +3574,9 @@ if page == "📈 Выручка":
                     fig.add_trace(go.Bar(x=h["HOUR"],y=h["REVENUE"],name="Выручка",marker_color="#00ff6a"))
                     fig.add_trace(go.Scatter(x=h["HOUR"],y=h["ORDER_COUNT"],name="Заказы",yaxis="y2",mode="lines+markers",line=dict(color="#f59e0b",width=3)))
                     fig.update_layout(title="По часам",yaxis=dict(title="₽"),yaxis2=dict(title="Шт",side="right",overlaying="y"),height=400,legend=dict(orientation="h",y=1.1),**CHART_THEME)
-                    st.plotly_chart(fig,use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
             else:
                 d=load_daily(date_from,date_to)
                 if not d.empty:
@@ -3131,10 +3584,12 @@ if page == "📈 Выручка":
                     fig.add_trace(go.Bar(x=d["DAY"],y=d["REVENUE"],name="Выручка",marker_color="#00ff6a"))
                     fig.add_trace(go.Scatter(x=d["DAY"],y=d["AVG_CHECK"],name="Ср.чек",yaxis="y2",mode="lines+markers",line=dict(color="#10b981",width=3)))
                     fig.update_layout(title="По дням",yaxis=dict(title="₽"),yaxis2=dict(title="Ср.чек",side="right",overlaying="y"),height=400,legend=dict(orientation="h",y=1.1),**CHART_THEME)
-                    st.plotly_chart(fig,use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         with cr:
             if guests>0:
-                st.markdown("### 👥 На гостя")
+                st.markdown("### На гостя")
                 st.metric("Ср. чек/гость",f"{rev/guests:,.0f} ₽")
                 st.metric("Гостей/заказ",f"{guests/n:.1f}" if n else "—")
                 st.metric("Блюд/заказ",f"{dishes_n/n:.1f}" if n else "—")
@@ -3152,15 +3607,15 @@ if page == "📈 Выручка":
             sm_cnt = int(staff_meals.iloc[0]["CNT"])
             sm_pct = (sm_total / rev * 100) if rev > 0 else 0
             st.divider()
-            st.markdown("### 🍴 Питание сотрудников")
+            st.markdown("### Питание сотрудников")
             sc1, sc2, sc3, sc4 = st.columns(4)
-            with sc1: st.metric("🍴 Сумма", f"{sm_total:,.0f} ₽")
-            with sc2: st.metric("🧾 Транзакций", f"{sm_cnt:,}")
-            with sc3: st.metric("📊 % от выручки", f"{sm_pct:.1f}%")
+            with sc1: st.metric("Сумма", f"{sm_total:,.0f} ₽")
+            with sc2: st.metric("Транзакций", f"{sm_cnt:,}")
+            with sc3: st.metric("% от выручки", f"{sm_pct:.1f}%")
             with sc4: st.metric("Ø Чек", f"{sm_total/sm_cnt:,.0f} ₽" if sm_cnt > 0 else "—")
 
             # Детализация по сотрудникам и столовым
-            with st.expander("📋 Подробнее — кто, где и сколько", expanded=False):
+            with st.expander("Подробнее", expanded=False):
                 staff_detail = run_query("""
                     SELECT c.NAME as EMPLOYEE, r.NAME as RESTAURANT,
                         COUNT(*) as MEALS, CAST(SUM(p.BASICSUM) AS INT) as TOTAL_SUM,
@@ -3181,7 +3636,7 @@ if page == "📈 Выручка":
 
                 if not staff_detail.empty:
                     # Сводка по сотрудникам
-                    st.markdown("#### 👤 По сотрудникам")
+                    st.markdown("#### По сотрудникам")
                     by_emp = staff_detail.groupby("EMPLOYEE").agg(
                         MEALS=("MEALS", "sum"),
                         TOTAL_SUM=("TOTAL_SUM", "sum"),
@@ -3192,14 +3647,16 @@ if page == "📈 Выручка":
 
                     top_emp = by_emp.head(20)
                     fig = px.bar(top_emp, x="TOTAL_SUM", y="EMPLOYEE", orientation="h",
-                        title="💰 Топ-20 по сумме питания",
+                        title="Топ-20 по сумме питания",
                         color="MEALS", color_continuous_scale="YlOrRd",
                         text=top_emp["TOTAL_SUM"].apply(lambda x: f"{x:,}₽"),
                         labels={"TOTAL_SUM": "Сумма, ₽", "EMPLOYEE": "Сотрудник", "MEALS": "Раз"})
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(400, len(top_emp)*28),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     disp_emp = by_emp.rename(columns={
                         "EMPLOYEE": "Сотрудник", "MEALS": "Раз",
@@ -3209,7 +3666,7 @@ if page == "📈 Выручка":
 
                     # Сводка по столовым
                     st.divider()
-                    st.markdown("#### 🏢 По столовым")
+                    st.markdown("#### По столовым")
                     by_rest = staff_detail.groupby("RESTAURANT").agg(
                         MEALS=("MEALS", "sum"),
                         TOTAL_SUM=("TOTAL_SUM", "sum"),
@@ -3217,14 +3674,16 @@ if page == "📈 Выручка":
                     ).reset_index().sort_values("TOTAL_SUM", ascending=False)
 
                     fig2 = px.bar(by_rest, x="TOTAL_SUM", y="RESTAURANT", orientation="h",
-                        title="🏢 Питание сотрудников по столовым",
+                        title="Питание сотрудников по столовым",
                         color="EMPLOYEES", color_continuous_scale="Viridis",
                         text=by_rest["TOTAL_SUM"].apply(lambda x: f"{x:,}₽"),
                         labels={"TOTAL_SUM": "Сумма, ₽", "RESTAURANT": "Столовая", "EMPLOYEES": "Сотрудников"})
                     fig2.update_traces(textposition="auto")
                     fig2.update_layout(height=max(350, len(by_rest)*30),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig2, use_container_width=True)
+                    fix_bar_hover(fig2)
+
+                    st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 
                     disp_rest = by_rest.rename(columns={
                         "RESTAURANT": "Столовая", "MEALS": "Раз",
@@ -3233,25 +3692,25 @@ if page == "📈 Выручка":
 
                     # Полная детализация
                     st.divider()
-                    st.markdown("#### 📋 Полная таблица")
+                    st.markdown("#### Данные")
                     disp_full = staff_detail.rename(columns={
                         "EMPLOYEE": "Сотрудник", "RESTAURANT": "Столовая",
                         "MEALS": "Раз", "TOTAL_SUM": "Сумма ₽", "AVG_CHECK": "Ø Чек ₽",
                         "FIRST_MEAL": "Первый", "LAST_MEAL": "Последний"})
                     st.dataframe(disp_full, use_container_width=True, hide_index=True, height=400)
-                    st.download_button("📥 CSV питание сотрудников", staff_detail.to_csv(index=False).encode("utf-8"),
+                    st.download_button("Скачать CSV", staff_detail.to_csv(index=False).encode("utf-8"),
                         "staff_meals.csv", "text/csv", use_container_width=True)
                 else:
                     st.info("Нет детализации по сотрудникам")
 
 # --- СЕЗОННОСТЬ ---
-if page == "📅 Сезонность":
-    page_header("Сезонность: год к году", "📅")
+if page == "Сезонность":
+    page_header("Сезонность")
     st.caption("Помесячное сравнение выручки — текущий год vs прошлый")
 
     yoy = load_monthly_revenue_yoy()
     if yoy.empty:
-        st.warning("⚠️ Нет данных по выручке")
+        st.warning("Нет данных по выручке")
     else:
         years = sorted(yoy["Y"].unique())
         MONTH_NAMES_RU = {1:"Январь",2:"Февраль",3:"Март",4:"Апрель",5:"Май",6:"Июнь",
@@ -3288,22 +3747,22 @@ if page == "📅 Сезонность":
         yoy_diff_pct = ((cur_total / prev_total - 1) * 100) if prev_total > 0 else 0
 
         c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric(f"💰 {cur_year}", f"{cur_total:,.0f} ₽")
+        with c1: st.metric(f"{cur_year}", f"{cur_total:,.0f} ₽")
         with c2:
             if prev_year:
-                st.metric(f"💰 {prev_year}", f"{prev_total:,.0f} ₽")
+                st.metric(f"{prev_year}", f"{prev_total:,.0f} ₽")
         with c3:
             if prev_year and prev_total > 0:
                 diff = cur_total - prev_total
-                st.metric("📊 Разница", f"{diff:+,.0f} ₽", f"{yoy_diff_pct:+.1f}%")
+                st.metric("Разница", f"{diff:+,.0f} ₽", f"{yoy_diff_pct:+.1f}%")
         with c4:
             n_months_cur = len(cur_data)
-            st.metric("📅 Месяцев", f"{n_months_cur}")
+            st.metric("Месяцев", f"{n_months_cur}")
 
         st.divider()
 
         # =============== ПЛАШКИ ПО МЕСЯЦАМ ===============
-        st.markdown(f"### 📅 Помесячно: {cur_year} vs {prev_year or '—'}")
+        st.markdown(f"### Помесячно: {cur_year} vs {prev_year or '—'}")
 
         # Для текущего года — показываем только прошедшие месяцы
         now = datetime.now()
@@ -3365,7 +3824,7 @@ if page == "📅 Сезонность":
         st.divider()
 
         # =============== ГРАФИКИ ===============
-        st.markdown("### 📊 Динамика по месяцам")
+        st.markdown("### Динамика")
 
         # Подготовка данных для графика
         chart_rows = []
@@ -3377,19 +3836,30 @@ if page == "📅 Сезонность":
         chart_df = pd.DataFrame(chart_rows)
 
         # Bar chart — рядом
+        prev_bar_color = "rgba(0,0,0,0.08)" if IS_LIGHT else "rgba(255,255,255,0.12)"
+        prev_bar_line = "rgba(0,0,0,0.12)" if IS_LIGHT else "rgba(255,255,255,0.15)"
+        prev_text_color = "#999" if IS_LIGHT else "#666"
+        cur_bar_color = "#00b847" if IS_LIGHT else "#00ff6a"
+        cur_text_color = "#1a1a2e" if IS_LIGHT else "#fff"
+        pos_color = "#00b847" if IS_LIGHT else "#00ff6a"
+        neg_color = "#e53e3e" if IS_LIGHT else "#ff4d6a"
+
         fig = go.Figure()
         if prev_year:
             fig.add_trace(go.Bar(name=str(prev_year), x=chart_df["Месяц"],
-                y=chart_df[str(prev_year)], marker_color="rgba(0,255,106,0.3)",
+                y=chart_df[str(prev_year)], marker_color=prev_bar_color,
+                marker_line=dict(color=prev_bar_line, width=1),
                 text=chart_df[str(prev_year)].apply(lambda x: f"{x/1e6:.1f}М" if x > 0 else ""),
-                textposition="auto"))
+                textposition="auto", textfont=dict(color=prev_text_color)))
         fig.add_trace(go.Bar(name=str(cur_year), x=chart_df["Месяц"],
-            y=chart_df[str(cur_year)], marker_color="#00ff6a",
+            y=chart_df[str(cur_year)], marker_color=cur_bar_color,
             text=chart_df[str(cur_year)].apply(lambda x: f"{x/1e6:.1f}М" if x > 0 else ""),
-            textposition="auto"))
-        fig.update_layout(barmode="group", title=f"📊 Выручка по месяцам: {cur_year} vs {prev_year or '—'}",
+            textposition="auto", textfont=dict(color=cur_text_color)))
+        fig.update_layout(barmode="group", title=f"Выручка по месяцам: {cur_year} vs {prev_year or '—'}",
             height=450, **CHART_THEME)
-        st.plotly_chart(fig, use_container_width=True)
+        fix_bar_hover(fig)
+
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # % изменения по месяцам
         if prev_year and not prev_data.empty:
@@ -3403,20 +3873,24 @@ if page == "📅 Сезонность":
             pct_df = pd.DataFrame(pct_rows).dropna(subset=["Изменение %"])
 
             if not pct_df.empty:
-                colors = ["#4caf50" if v > 0 else "#f44336" for v in pct_df["Изменение %"]]
+                colors = [pos_color if v > 0 else neg_color for v in pct_df["Изменение %"]]
                 fig2 = go.Figure(go.Bar(x=pct_df["Месяц"], y=pct_df["Изменение %"],
                     marker_color=colors,
+                    marker_line=dict(width=0),
                     text=pct_df["Изменение %"].apply(lambda x: f"{x:+.1f}%"),
-                    textposition="auto"))
-                fig2.add_hline(y=0, line_dash="dot", line_color="#555")
-                fig2.update_layout(title=f"📈 Изменение выручки {cur_year} vs {prev_year} (%)",
-                    height=350, **CHART_THEME,
-                    yaxis_title="Изменение, %")
-                st.plotly_chart(fig2, use_container_width=True)
+                    textposition="outside", textfont=dict(color=cur_text_color, size=13, family="Inter")))
+                fig2.add_hline(y=0, line_dash="dot", line_color="rgba(0,0,0,0.15)" if IS_LIGHT else "rgba(255,255,255,0.1)")
+                fig2.update_layout(title=f"Изменение выручки {cur_year} vs {prev_year} (%)",
+                    height=400, **CHART_THEME,
+                    yaxis_title="Изменение, %",
+                    bargap=0.4)
+                fix_bar_hover(fig2)
+
+                st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 
         # Таблица
         st.divider()
-        st.markdown("### 📋 Таблица")
+        st.markdown("### Таблица")
         table_rows = []
         for m in range(1, (max_month_cur + 1) if cur_year == now.year else 13):
             r = {"Месяц": MONTH_NAMES_RU[m]}
@@ -3437,26 +3911,30 @@ if page == "📅 Сезонность":
         st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
 
 # --- БЛЮДА ---
-if page == "🍕 Блюда":
-    page_header("Топ блюд", "🍕")
+if page == "Блюда":
+    page_header("Топ блюд")
     ds=load_dishes(date_from,date_to)
     if not ds.empty:
         cl,cr=st.columns(2)
         with cl:
-            fig=px.bar(ds.head(15),x="TOTAL_SUM",y="DISH_NAME",orientation="h",title="🏆 По выручке",color="TOTAL_SUM",color_continuous_scale="Viridis", labels=RU)
+            fig=px.bar(ds.head(15),x="TOTAL_SUM",y="DISH_NAME",orientation="h",title="По выручке",color="TOTAL_SUM",color_continuous_scale="Viridis", labels=RU)
             fig.update_layout(height=500,yaxis=dict(autorange="reversed"),coloraxis_showscale=False,**CHART_THEME)
-            st.plotly_chart(fig,use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         with cr:
             tq=ds.sort_values("TOTAL_QTY",ascending=False).head(15)
             fig=px.bar(tq,x="TOTAL_QTY",y="DISH_NAME",orientation="h",title="🔥 По количеству",color="TOTAL_QTY",color_continuous_scale="Inferno", labels=RU)
             fig.update_layout(height=500,yaxis=dict(autorange="reversed"),coloraxis_showscale=False,**CHART_THEME)
-            st.plotly_chart(fig,use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
         st.dataframe(ds.rename(columns={"DISH_ID":"ID","DISH_NAME":"Блюдо","TOTAL_QTY":"Кол-во","TOTAL_SUM":"Выручка","ORDER_COUNT":"Заказов"}),use_container_width=True,hide_index=True)
     else: st.info("Нет данных")
 
 # --- СТОЛОВЫЕ ---
-if page == "🏢 Столовые":
-    page_header("Столовые", "🏢")
+if page == "Столовые":
+    page_header("Столовые")
     rest_data = load_revenue_by_restaurant(date_from, date_to)
     if not rest_data.empty:
         total_rev = float(rest_data["REVENUE"].sum())
@@ -3465,30 +3943,36 @@ if page == "🏢 Столовые":
         active_rest = len(rest_data)
 
         c1,c2,c3,c4 = st.columns(4)
-        with c1: st.metric("🏢 Точек работает", f"{active_rest}")
-        with c2: st.metric("💰 Общая выручка", f"{total_rev:,.0f} ₽")
-        with c3: st.metric("🧾 Заказов", f"{total_ord:,}")
-        with c4: st.metric("👥 Гостей", f"{total_guests:,}")
+        with c1: st.metric("Точек", f"{active_rest}")
+        with c2: st.metric("Выручка", f"{total_rev:,.0f} ₽")
+        with c3: st.metric("Заказов", f"{total_ord:,}")
+        with c4: st.metric("Гостей", f"{total_guests:,}")
         st.divider()
 
         # Выручка по столовым
         fig = px.bar(rest_data, x="REVENUE", y="REST_NAME", orientation="h",
-            title="💰 Выручка по точкам", color="REVENUE", color_continuous_scale="Viridis",
+            title="Выручка по точкам", color="REVENUE", color_continuous_scale="Viridis",
             hover_data={"ORDER_COUNT":True, "AVG_CHECK":":.0f", "GUESTS":True}, labels=RU)
         fig.update_layout(height=max(400, len(rest_data)*35), yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-        st.plotly_chart(fig, use_container_width=True)
+        fix_bar_hover(fig)
+
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # Средний чек по столовым
         cl,cr = st.columns(2)
         with cl:
             fig = px.bar(rest_data.sort_values("AVG_CHECK",ascending=False), x="AVG_CHECK", y="REST_NAME",
-                orientation="h", title="📊 Средний чек по точкам", color="AVG_CHECK", color_continuous_scale="Tealgrn", labels=RU)
+                orientation="h", title="Средний чек по точкам", color="AVG_CHECK", color_continuous_scale="Tealgrn", labels=RU)
             fig.update_layout(height=max(400,len(rest_data)*30), yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
         with cr:
-            fig = px.pie(rest_data.head(10), values="REVENUE", names="REST_NAME", title="🥧 Доля выручки (топ-10)", hole=0.4, labels=RU)
+            fig = px.pie(rest_data.head(10), values="REVENUE", names="REST_NAME", title="Доля выручки", hole=0.4, labels=RU)
             fig.update_layout(height=400, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # Динамика по столовым
         if (date_to-date_from).days > 1:
@@ -3497,9 +3981,11 @@ if page == "🏢 Столовые":
                 top5 = rest_data.head(5)["REST_NAME"].tolist()
                 dr_top = daily_rest[daily_rest["REST_NAME"].isin(top5)]
                 fig = px.line(dr_top, x="DAY", y="REVENUE", color="REST_NAME",
-                    title="📈 Динамика выручки (топ-5 точек)", markers=True, labels=RU)
+                    title="Динамика выручки (топ-5 точек)", markers=True, labels=RU)
                 fig.update_layout(height=400, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         st.dataframe(rest_data.rename(columns={"REST_ID":"ID","REST_NAME":"Точка","ORDER_COUNT":"Заказов",
             "REVENUE":"Выручка","GUESTS":"Гостей","AVG_CHECK":"Ср.чек","DISHES":"Блюд"}),
@@ -3507,27 +3993,31 @@ if page == "🏢 Столовые":
     else: st.info("Нет данных по столовым")
 
 # --- КАТЕГОРИИ ---
-if page == "🗂️ Категории":
-    page_header("Категории", "🗂️")
+if page == "Категории":
+    page_header("Категории")
     cat_data = load_revenue_by_category(date_from, date_to)
     if not cat_data.empty:
         cl,cr = st.columns(2)
         with cl:
             fig = px.bar(cat_data.head(15), x="TOTAL_SUM", y="CATEGORY", orientation="h",
-                title="💰 Выручка по категориям", color="TOTAL_SUM", color_continuous_scale="Sunset", labels=RU)
+                title="Выручка по категориям", color="TOTAL_SUM", color_continuous_scale="Sunset", labels=RU)
             fig.update_layout(height=500, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
         with cr:
             fig = px.pie(cat_data.head(10), values="TOTAL_SUM", names="CATEGORY",
-                title="🥧 Доля категорий", hole=0.35, labels=RU)
-            fig.update_layout(height=500, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+                title="Доля категорий", hole=0.35, labels=RU)
+            fig.update_layout(height=500, legend=dict(orientation="h", yanchor="top", y=-0.05, font_size=10), **CHART_THEME)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
         st.dataframe(cat_data.rename(columns={"CAT_ID":"ID","CATEGORY":"Категория","TOTAL_QTY":"Кол-во",
             "TOTAL_SUM":"Выручка","ORDER_COUNT":"Заказов"}), use_container_width=True, hide_index=True)
 
         # === Drill-down: топ блюд в категории ===
         st.divider()
-        st.markdown("### 🔍 Топ блюд в категории")
+        st.markdown("### Топ блюд в категории")
         cat_options = cat_data[["CAT_ID", "CATEGORY"]].copy()
         cat_options["label"] = cat_options["CATEGORY"] + " (" + cat_data["TOTAL_SUM"].apply(lambda x: f"{x:,.0f} ₽") + ")"
         selected_cat_label = st.selectbox("Выберите категорию:", cat_options["label"].tolist(), key="cat_drill")
@@ -3539,18 +4029,20 @@ if page == "🗂️ Категории":
         if not dishes_in_cat.empty:
             c1,c2,c3 = st.columns(3)
             with c1: st.metric("🍽 Блюд", f"{len(dishes_in_cat)}")
-            with c2: st.metric("💰 Выручка", f"{dishes_in_cat['TOTAL_SUM'].sum():,.0f} ₽")
-            with c3: st.metric("📦 Продано шт.", f"{dishes_in_cat['TOTAL_QTY'].sum():,.0f}")
+            with c2: st.metric("Выручка", f"{dishes_in_cat['TOTAL_SUM'].sum():,.0f} ₽")
+            with c3: st.metric("Продано", f"{dishes_in_cat['TOTAL_QTY'].sum():,.0f}")
 
             fig_d = px.bar(dishes_in_cat.head(20), x="TOTAL_SUM", y="DISH_NAME", orientation="h",
-                title=f"🏆 Топ блюд — {selected_cat_name}",
+                title=f"Топ блюд — {selected_cat_name}",
                 color="TOTAL_SUM", color_continuous_scale="Viridis",
                 text=dishes_in_cat.head(20)["TOTAL_SUM"].apply(lambda x: f"{x:,.0f}₽"),
                 labels={"TOTAL_SUM": "Выручка, ₽", "DISH_NAME": "Блюдо"})
             fig_d.update_traces(textposition="auto")
             fig_d.update_layout(height=max(400, len(dishes_in_cat.head(20))*25),
                 yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig_d, use_container_width=True)
+            fix_bar_hover(fig_d)
+
+            st.plotly_chart(fig_d, use_container_width=True, config={"displayModeBar":False})
 
             disp_d = dishes_in_cat.rename(columns={
                 "DISH_NAME":"Блюдо","TOTAL_QTY":"Кол-во","TOTAL_SUM":"Выручка ₽",
@@ -3561,23 +4053,25 @@ if page == "🗂️ Категории":
     else: st.info("Нет данных по категориям")
 
 # --- ПЕРСОНАЛ ---
-if page == "👨‍🍳 Персонал":
-    page_header("Персонал", "👨‍🍳")
-    sub1,sub2 = st.tabs(["📊 Выручка кассиров","⏰ Рабочее время"])
+if page == "Персонал":
+    page_header("Персонал")
+    sub1,sub2 = st.tabs(["Выручка кассиров","Рабочее время"])
 
     with sub1:
         emp = load_top_employees(date_from, date_to)
         if not emp.empty:
             c1,c2,c3 = st.columns(3)
-            with c1: st.metric("👥 Работало", f"{len(emp)}")
-            with c2: st.metric("🏆 Лучший", emp.iloc[0]["EMP_NAME"] if emp.iloc[0]["EMP_NAME"] else "—")
-            with c3: st.metric("💰 Макс. выручка", f'{float(emp.iloc[0]["REVENUE"]):,.0f} ₽')
+            with c1: st.metric("Работало", f"{len(emp)}")
+            with c2: st.metric("Лучший", emp.iloc[0]["EMP_NAME"] if emp.iloc[0]["EMP_NAME"] else "—")
+            with c3: st.metric("Макс. выручка", f'{float(emp.iloc[0]["REVENUE"]):,.0f} ₽')
 
             fig = px.bar(emp.head(15), x="REVENUE", y="EMP_NAME", orientation="h",
-                title="🏆 Топ кассиров по выручке", color="REVENUE", color_continuous_scale="Viridis",
+                title="Топ кассиров по выручке", color="REVENUE", color_continuous_scale="Viridis",
                 hover_data={"ORDER_COUNT":True,"AVG_CHECK":":.0f"}, labels=RU)
             fig.update_layout(height=500, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             st.dataframe(emp.rename(columns={"EMP_ID":"ID","EMP_NAME":"Сотрудник","ORDER_COUNT":"Заказов",
                 "REVENUE":"Выручка","AVG_CHECK":"Ср.чек","GUESTS":"Гостей"}), use_container_width=True, hide_index=True)
@@ -3591,7 +4085,7 @@ if page == "👨‍🍳 Персонал":
             late_pct = total_late / total_shifts * 100 if total_shifts else 0
 
             c1,c2,c3 = st.columns(3)
-            with c1: st.metric("📅 Смен всего", f"{total_shifts}")
+            with c1: st.metric("Смен всего", f"{total_shifts}")
             with c2: st.metric("⏰ Опозданий", f"{total_late}")
             with c3: st.metric("📉 % опозданий", f"{late_pct:.1f}%")
 
@@ -3601,15 +4095,17 @@ if page == "👨‍🍳 Персонал":
                 fig = px.bar(late_emp, x="LATE_COUNT", y="EMP_NAME", orientation="h",
                     title="⏰ Топ по опозданиям", color="LATE_COUNT", color_continuous_scale="Reds", labels=RU)
                 fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             st.dataframe(clock.rename(columns={"EMPID":"ID","EMP_NAME":"Сотрудник","SHIFT_COUNT":"Смен",
                 "AVG_HOURS":"Ср.часов","LATE_COUNT":"Опозданий"}), use_container_width=True, hide_index=True)
         else: st.info("Нет данных по рабочему времени")
 
 # --- КАССА ---
-if page == "💰 Касса":
-    page_header("Касса", "💰")
+if page == "Касса":
+    page_header("Касса")
     cash = load_cashinout(date_from, date_to)
     if not cash.empty:
         deposits = cash[cash["ISDEPOSIT"]==1]
@@ -3618,7 +4114,7 @@ if page == "💰 Касса":
         col_sum = float(collections["ORIGINALSUM"].abs().sum()) if not collections.empty else 0
 
         c1,c2,c3,c4 = st.columns(4)
-        with c1: st.metric("📥 Внесений", f"{len(deposits)}")
+        with c1: st.metric("Внесений", f"{len(deposits)}")
         with c2: st.metric("💵 Сумма внесений", f"{dep_sum:,.0f} ₽")
         with c3: st.metric("📤 Изъятий", f"{len(collections)}")
         with c4: st.metric("💸 Сумма изъятий", f"{col_sum:,.0f} ₽")
@@ -3632,10 +4128,12 @@ if page == "💰 Касса":
 
         if not daily_cash.empty:
             fig = px.bar(daily_cash, x="DAY", y="SUM", color="TYPE", barmode="group",
-                title="📊 Внесения и изъятия по дням",
+                title="Внесения и изъятия",
                 color_discrete_map={"Внесение":"#10b981","Изъятие":"#ef4444"}, labels=RU)
             fig.update_layout(height=400, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # По причинам
         kind_map = {0:"Вручную",1:"Программой",3:"Закрытие смены",2:"Чаевые",4:"Закр.общей смены",5:"Откр.общей смены",6:"Пополнение карты"}
@@ -3644,20 +4142,22 @@ if page == "💰 Касса":
         if not by_kind.empty:
             fig = px.pie(by_kind, values="SUM", names="KIND_NAME", title="По типам операций", hole=0.4, labels=RU)
             fig.update_layout(height=400, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     else: st.info("Нет кассовых операций")
 
 # --- ЦЕНЫ ---
-if page == "📊 Цены":
-    page_header("Анализ цен", "📊")
-    st.markdown("### 📊 Анализ изменения цен")
+if page == "Цены":
+    page_header("Анализ цен")
+    st.markdown("### Анализ цен")
     st.caption("Показаны только блюда, у которых цена менялась за период")
     prices = load_current_prices(date_from, date_to)
     if not prices.empty:
         c1,c2,c3 = st.columns(3)
-        with c1: st.metric("🔄 Блюд с изменённой ценой", f"{len(prices)}")
-        with c2: st.metric("📈 Макс. разница", f'{float(prices["PRICE_DIFF"].max()):,.0f} ₽')
-        with c3: st.metric("📊 Ср. разница", f'{float(prices["PRICE_DIFF"].mean()):,.0f} ₽')
+        with c1: st.metric("Блюд с изменённой ценой", f"{len(prices)}")
+        with c2: st.metric("Макс. разница", f'{float(prices["PRICE_DIFF"].max()):,.0f} ₽')
+        with c3: st.metric("Ср. разница", f'{float(prices["PRICE_DIFF"].mean()):,.0f} ₽')
         st.divider()
 
         # Топ по разнице цен
@@ -3665,30 +4165,36 @@ if page == "📊 Цены":
         with cl:
             top_diff = prices.head(15)
             fig = px.bar(top_diff, x="PRICE_DIFF", y="DISH_NAME", orientation="h",
-                title="📈 Наибольший рост цены", color="PRICE_DIFF", color_continuous_scale="Reds",
+                title="Наибольший рост цены", color="PRICE_DIFF", color_continuous_scale="Reds",
                 hover_data={"MIN_PRICE":True,"MAX_PRICE":True,"PRICE_VARIANTS":True}, labels=RU)
             fig.update_layout(height=500, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
         with cr:
             fig = px.bar(top_diff, x="PRICE_VARIANTS", y="DISH_NAME", orientation="h",
                 title="🔢 Количество вариантов цен", color="PRICE_VARIANTS", color_continuous_scale="Viridis",
                 hover_data={"MIN_PRICE":True,"MAX_PRICE":True}, labels=RU)
             fig.update_layout(height=500, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # Min vs Max (диапазон)
         fig = go.Figure()
         top20 = prices.head(20)
         fig.add_trace(go.Bar(x=top20["DISH_NAME"], y=top20["MIN_PRICE"], name="Мин. цена", marker_color="#00ff6a"))
         fig.add_trace(go.Bar(x=top20["DISH_NAME"], y=top20["PRICE_DIFF"], name="Разница", marker_color="#ef4444"))
-        fig.update_layout(title="📊 Диапазон цен (мин + разница = макс)", barmode="stack",
+        fig.update_layout(title="Диапазон цен (мин + разница = макс)", barmode="stack",
             height=400, xaxis_tickangle=-45, **CHART_THEME)
-        st.plotly_chart(fig, use_container_width=True)
+        fix_bar_hover(fig)
+
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # История цен
         if (date_to - date_from).days > 1:
             st.divider()
-            st.markdown("#### 📈 История цен по блюдам")
+            st.markdown("#### История цен")
             ph = load_price_history(date_from, date_to)
             if not ph.empty:
                 top_dishes = prices.head(10)["DISH_NAME"].tolist()
@@ -3699,7 +4205,9 @@ if page == "📊 Цены":
                         fig = px.line(ph_filt, x="DAY", y="AVG_PRICE", color="DISH_NAME",
                             title="Динамика цен", markers=True, labels={"AVG_PRICE":"Цена, ₽","DAY":"Дата"})
                         fig.update_layout(height=400, **CHART_THEME)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         st.divider()
         disp = prices.copy()
@@ -3708,9 +4216,9 @@ if page == "📊 Цены":
     else: st.info("Нет данных по ценам")
 
 # --- ABC ---
-if page == "🔤 ABC":
-    page_header("ABC-анализ", "🔤")
-    st.markdown("### 🔤 ABC-анализ блюд")
+if page == "ABC":
+    page_header("ABC-анализ")
+    st.markdown("### ABC-анализ")
     st.caption("A = 80% выручки (звёзды), B = 15% (середнячки), C = 5% (кандидаты на вылет)")
     abc = load_abc_analysis(date_from, date_to)
     if not abc.empty:
@@ -3754,7 +4262,9 @@ if page == "🔤 ABC":
                     f"B — {b_count} блюд": "#f59e0b",
                     f"C — {c_count} блюд": "#ef4444"}, labels=RU)
             fig.update_layout(height=400, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         with cr:
             # Сводка по группам
@@ -3783,7 +4293,9 @@ if page == "🔤 ABC":
             fig.update_traces(textposition="auto")
             fig.update_layout(height=max(400, min(30, len(show))*28),
                 yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
         else:
             st.info(f"Нет блюд в группе {grp_letter}")
 
@@ -3798,7 +4310,9 @@ if page == "🔤 ABC":
                     color_discrete_map={"A":"#10b981","B":"#f59e0b","C":"#ef4444"},
                     barmode="stack", labels=RU)
                 fig.update_layout(height=400, xaxis_tickangle=-45, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # Фильтр по группам
         st.divider()
@@ -3810,8 +4324,8 @@ if page == "🔤 ABC":
     else: st.info("Нет данных для ABC-анализа")
 
 # --- СКОРОСТЬ ---
-if page == "⏱️ Скорость":
-    page_header("Скорость обслуживания", "⏱️")
+if page == "Скорость":
+    page_header("Скорость обслуживания")
     st.caption("Время от создания заказа до закрытия после оплаты")
 
     speed = load_cashier_speed(date_from, date_to)
@@ -3825,10 +4339,10 @@ if page == "⏱️ Скорость":
         slowest_sec = float(speed.iloc[-1]["AVG_SEC"])
 
         c1,c2,c3,c4 = st.columns(4)
-        with c1: st.metric("⏱️ Среднее время", f"{avg_all:.0f} сек")
-        with c2: st.metric("🏆 Самый быстрый", f"{fastest}", delta=f"{fastest_sec:.0f} сек")
+        with c1: st.metric("Среднее время", f"{avg_all:.0f} сек")
+        with c2: st.metric("Самый быстрый", f"{fastest}", delta=f"{fastest_sec:.0f} сек")
         with c3: st.metric("🐢 Самый медленный", f"{slowest}", delta=f"{slowest_sec:.0f} сек", delta_color="inverse")
-        with c4: st.metric("👥 Кассиров", f"{len(speed)}")
+        with c4: st.metric("Кассиров", f"{len(speed)}")
         st.divider()
 
         # Распределение времени
@@ -3836,32 +4350,38 @@ if page == "⏱️ Скорость":
             dist_clean = dist.copy()
             dist_clean["LABEL"] = dist_clean["TIME_RANGE"].str[4:]  # убираем 01. 02. ...
             fig = px.bar(dist_clean, x="LABEL", y="ORDER_COUNT",
-                title="📊 Распределение заказов по времени обслуживания",
+                title="Распределение заказов по времени обслуживания",
                 color="ORDER_COUNT", color_continuous_scale="RdYlGn_r",
                 text="ORDER_COUNT", labels={"LABEL":"Время","ORDER_COUNT":"Заказов"})
             fig.update_traces(textposition="auto")
             fig.update_layout(height=400, coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # Кассиры
         cl, cr = st.columns(2)
         with cl:
             fig = px.bar(speed, x="AVG_SEC", y="CASHIER", orientation="h",
-                title="⏱️ Среднее время по кассирам (сек)",
+                title="Среднее время по кассирам (сек)",
                 color="AVG_SEC", color_continuous_scale="RdYlGn_r",
                 hover_data={"ORDERS":True, "AVG_DISHES":":.1f", "AVG_CHECK":":.0f"}, labels=RU)
             fig.update_layout(height=max(400, len(speed)*30), yaxis=dict(autorange="reversed"),
                 coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         with cr:
             # Скорость vs Выручка (scatter)
             fig = px.scatter(speed, x="AVG_SEC", y="REVENUE", size="ORDERS",
-                hover_name="CASHIER", title="💡 Скорость vs Выручка",
+                hover_name="CASHIER", title="Скорость vs Выручка",
                 labels={"AVG_SEC":"Ср. время, сек","REVENUE":"Выручка, ₽"},
                 color="AVG_DISHES", color_continuous_scale="Viridis")
             fig.update_layout(height=max(400, len(speed)*30), coloraxis_colorbar_title="Ср.блюд", **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # По часам
         speed_hour = load_speed_by_hour(date_from, date_to)
@@ -3876,18 +4396,22 @@ if page == "⏱️ Скорость":
             fig.update_layout(title="⏰ Скорость по часам дня",
                 yaxis=dict(title="Ср. время, сек"), yaxis2=dict(title="Заказов", side="right", overlaying="y"),
                 height=400, legend=dict(orientation="h", y=1.1), **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # По столовым
         speed_rest = load_speed_by_restaurant(date_from, date_to)
         if not speed_rest.empty:
             st.divider()
             fig = px.bar(speed_rest, x="AVG_SEC", y="REST_NAME", orientation="h",
-                title="🏢 Скорость по точкам", color="AVG_SEC", color_continuous_scale="RdYlGn_r",
+                title="Скорость по точкам", color="AVG_SEC", color_continuous_scale="RdYlGn_r",
                 hover_data={"ORDERS":True, "AVG_DISHES":":.1f"}, labels=RU)
             fig.update_layout(height=max(400, len(speed_rest)*30),
                 yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # Таблица
         st.divider()
@@ -3900,8 +4424,8 @@ if page == "⏱️ Скорость":
         st.info("Нет данных по скорости")
 
 # --- СМЕНЫ ---
-if page == "🕐 Смены":
-    page_header("Смены по столовым", "🕐")
+if page == "Смены":
+    page_header("Смены")
     shifts = load_shifts(date_from, date_to)
     if not shifts.empty:
         total_shifts = len(shifts)
@@ -3909,9 +4433,9 @@ if page == "🕐 Смены":
         avg_hours = float(shifts[shifts["DURATION_MIN"]>0]["DURATION_MIN"].mean())/60 if len(shifts[shifts["DURATION_MIN"]>0]) else 0
 
         c1,c2,c3 = st.columns(3)
-        with c1: st.metric("📅 Смен за период", f"{total_shifts}")
-        with c2: st.metric("🟢 Открыто сейчас", f"{open_now}")
-        with c3: st.metric("⏱️ Ср. длительность", f"{avg_hours:.1f} ч")
+        with c1: st.metric("Смен за период", f"{total_shifts}")
+        with c2: st.metric("Открыто", f"{open_now}")
+        with c3: st.metric("Ср. длительность", f"{avg_hours:.1f} ч")
         st.divider()
 
         st.markdown("""
@@ -3937,11 +4461,13 @@ if page == "🕐 Смены":
         by_rest["AVG_HOURS"] = by_rest["AVG_MIN"] / 60
         
         fig = px.bar(by_rest, x="SHIFTS", y="REST_NAME", orientation="h",
-            title="📊 Количество смен по точкам", color="AVG_HOURS",
+            title="Количество смен по точкам", color="AVG_HOURS",
             color_continuous_scale="RdYlGn", hover_data={"AVG_HOURS":":.1f"}, labels=RU)
         fig.update_layout(height=max(400,len(by_rest)*28), yaxis=dict(autorange="reversed"),
             coloraxis_colorbar_title="Ср.часов", **CHART_THEME)
-        st.plotly_chart(fig, use_container_width=True)
+        fix_bar_hover(fig)
+
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # Таблица смен
         st.divider()
@@ -3955,10 +4481,10 @@ if page == "🕐 Смены":
         st.info("Нет данных по сменам")
 
 # --- ПРОБЛЕМЫ ---
-if page == "⚠️ Проблемы":
-    page_header("Проблемы: карты, маркировка, чеки", "⚠️")
+if page == "Проблемы":
+    page_header("Проблемы")
     
-    sub_mark, sub_cards, sub_fiscal = st.tabs(["🏷️ Честный знак", "💳 Проблемы с картами", "🧾 Фискализация"])
+    sub_mark, sub_cards, sub_fiscal = st.tabs(["Честный знак", "Проблемы с картами", "Фискализация"])
 
     # ========== ЧЕСТНЫЙ ЗНАК ==========
     with sub_mark:
@@ -3971,13 +4497,13 @@ if page == "⚠️ Проблемы":
         | 🟢 **0** | Проверка пройдена, маркировка валидная | Всё ок |
         | 🔴 **1** | Ошибка проверки (сервис недоступен, код выведен из оборота) | Проверить товар, связаться с поставщиком |
         | 🟡 **2** | Предупреждение (частичная проверка) | Обратить внимание |
-        | ⏱️ **3** | Таймаут (сервер не ответил вовремя) | Проблема с интернетом или нагрузкой сервиса |
+        | **3** | Таймаут (сервер не ответил вовремя) | Проблема с интернетом или нагрузкой сервиса |
         """)
         st.divider()
 
         stats = load_checkmark_stats(date_from, date_to)
         if not stats.empty:
-            res_map = {0:"🟢 ОК", 1:"🔴 Ошибка", 2:"🟡 Предупреждение", 3:"⏱️ Таймаут"}
+            res_map = {0:"🟢 ОК", 1:"🔴 Ошибка", 2:"🟡 Предупреждение", 3:"Таймаут"}
             stats["STATUS"] = stats["RES"].map(res_map).fillna("Неизвестно")
             total = int(stats["CNT"].sum())
             ok_cnt = int(stats[stats["RES"]==0]["CNT"].sum()) if 0 in stats["RES"].values else 0
@@ -3986,29 +4512,33 @@ if page == "⚠️ Проблемы":
             err_pct = (total - ok_cnt) / total * 100 if total else 0
 
             c1,c2,c3,c4 = st.columns(4)
-            with c1: st.metric("📊 Всего проверок", f"{total:,}")
-            with c2: st.metric("🟢 Успешных", f"{ok_cnt:,}")
-            with c3: st.metric("🔴 Ошибок", f"{err_cnt:,}")
-            with c4: st.metric("⏱️ Таймаутов", f"{timeout_cnt:,}")
+            with c1: st.metric("Всего проверок", f"{total:,}")
+            with c2: st.metric("Успешных", f"{ok_cnt:,}")
+            with c3: st.metric("Ошибок", f"{err_cnt:,}")
+            with c4: st.metric("Таймаутов", f"{timeout_cnt:,}")
 
             cl,cr = st.columns(2)
             with cl:
                 fig = px.pie(stats, values="CNT", names="STATUS", title="Результаты проверок",
-                    color_discrete_map={"🟢 ОК":"#10b981","🔴 Ошибка":"#ef4444","🟡 Предупреждение":"#f59e0b","⏱️ Таймаут":"#00ff6a"}, hole=0.4, labels=RU)
+                    color_discrete_map={"🟢 ОК":"#10b981","🔴 Ошибка":"#ef4444","🟡 Предупреждение":"#f59e0b","Таймаут":"#00ff6a"}, hole=0.4, labels=RU)
                 fig.update_layout(height=400, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
             with cr:
                 fig = px.bar(stats[stats["RES"]!=0], x="CNT", y="STATUS", orientation="h",
                     title="Проблемные проверки", color="STATUS",
-                    color_discrete_map={"🔴 Ошибка":"#ef4444","🟡 Предупреждение":"#f59e0b","⏱️ Таймаут":"#00ff6a"}, labels=RU)
+                    color_discrete_map={"🔴 Ошибка":"#ef4444","🟡 Предупреждение":"#f59e0b","Таймаут":"#00ff6a"}, labels=RU)
                 fig.update_layout(height=400, showlegend=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # Детали ошибок
         errors = load_checkmark_errors(date_from, date_to)
         if not errors.empty:
             st.divider()
-            st.markdown("#### 🔍 Детали ошибок")
+            st.markdown("#### Детали ошибок")
 
             # По типам ошибок
             by_msg = errors.groupby("MESSAGEFROMDRIVER").agg(CNT=("RES","count")).reset_index().sort_values("CNT",ascending=False)
@@ -4016,7 +4546,9 @@ if page == "⚠️ Проблемы":
                 fig = px.bar(by_msg.head(10), x="CNT", y="MESSAGEFROMDRIVER", orientation="h",
                     title="Типы ошибок", color="CNT", color_continuous_scale="Reds", labels=RU)
                 fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             # По товарам
             by_prod = errors.groupby("PRODUCT").agg(CNT=("RES","count")).reset_index().sort_values("CNT",ascending=False)
@@ -4025,7 +4557,9 @@ if page == "⚠️ Проблемы":
                 fig = px.bar(by_prod.head(15), x="CNT", y="PRODUCT", orientation="h",
                     title="Проблемные товары", color="CNT", color_continuous_scale="Oranges", labels=RU)
                 fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             # Таблица ошибок
             st.divider()
@@ -4063,32 +4597,36 @@ if page == "⚠️ Проблемы":
             no_trans = int(card_stats[card_stats["TRANSACTIONSTATUS"]==0]["CNT"].sum()) if 0 in card_stats["TRANSACTIONSTATUS"].values else 0
 
             c1,c2,c3,c4 = st.columns(4)
-            with c1: st.metric("💳 Всего транзакций", f"{total:,}")
-            with c2: st.metric("🟢 Успешных", f"{ok_cnt:,}")
-            with c3: st.metric("🔴 Отменённых", f"{cancel_cnt:,}")
+            with c1: st.metric("Всего транзакций", f"{total:,}")
+            with c2: st.metric("Успешных", f"{ok_cnt:,}")
+            with c3: st.metric("Отменённых", f"{cancel_cnt:,}")
             with c4: st.metric("⚪ Без транзакции", f"{no_trans:,}")
 
             cl,cr = st.columns(2)
             with cl:
                 fig = px.pie(card_stats, values="CNT", names="STATUS", title="Статусы транзакций", hole=0.4, labels=RU)
                 fig.update_layout(height=400, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
             with cr:
                 problem = card_stats[card_stats["TRANSACTIONSTATUS"].isin([0,1,6])]
                 if not problem.empty:
                     fig = px.bar(problem, x="CNT", y="STATUS", orientation="h",
-                        title="⚠️ Проблемные транзакции", color="CNT", color_continuous_scale="Reds", labels=RU)
+                        title="Проблемные транзакции", color="CNT", color_continuous_scale="Reds", labels=RU)
                     fig.update_layout(height=300, coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
                 else:
                     st.success("Все транзакции успешны!")
 
             if cancel_cnt > 0 or no_trans > 0:
-                st.warning(f"⚠️ {cancel_cnt} отменённых + {no_trans} без транзакции = потенциальные проблемы с терминалами. Рекомендуется проверить оборудование.")
+                st.warning(f"{cancel_cnt} отменённых + {no_trans} без транзакции = потенциальные проблемы с терминалами. Рекомендуется проверить оборудование.")
 
             # --- Разбивка по столовым ---
             st.divider()
-            st.markdown("### 🏢 Проблемы по столовым")
+            st.markdown("### По столовым")
             card_by_rest = load_card_errors_by_restaurant(date_from, date_to)
             if not card_by_rest.empty:
                 status_map_r = {0:"Нет транзакции", 1:"Отменена", 4:"Авторизована", 5:"Подтверждена", 6:"Возврат"}
@@ -4104,24 +4642,26 @@ if page == "⚠️ Проблемы":
                     ).reset_index().sort_values("PROBLEM_COUNT", ascending=False)
 
                     c1, c2 = st.columns(2)
-                    with c1: st.metric("🏢 Столовых с проблемами", f"{len(by_rest)}")
-                    with c2: st.metric("⚠️ Всего проблемных", f"{by_rest['PROBLEM_COUNT'].sum():,}")
+                    with c1: st.metric("Столовых с проблемами", f"{len(by_rest)}")
+                    with c2: st.metric("Всего проблемных", f"{by_rest['PROBLEM_COUNT'].sum():,}")
 
                     # Топ столовых по проблемам
                     top_rest = by_rest.head(15)
                     fig = px.bar(top_rest, x="PROBLEM_COUNT", y="REST_NAME", orientation="h",
-                        title="⚠️ Столовые с проблемными транзакциями",
+                        title="Столовые с проблемными транзакциями",
                         color="PROBLEM_COUNT", color_continuous_scale="Reds",
                         text="PROBLEM_COUNT",
                         labels={"PROBLEM_COUNT": "Проблемных", "REST_NAME": "Столовая"})
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(400, len(top_rest)*30),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     # Детализация: столовая → типы проблем
                     st.divider()
-                    st.markdown("#### 📋 Детализация по типам проблем")
+                    st.markdown("#### По типам проблем")
                     pivot = problems.pivot_table(index="REST_NAME", columns="STATUS",
                         values="CNT", aggfunc="sum", fill_value=0).reset_index()
                     pivot["Всего"] = pivot.select_dtypes(include="number").sum(axis=1)
@@ -4135,19 +4675,21 @@ if page == "⚠️ Проблемы":
                         by_rest_sum = by_rest[by_rest["PROBLEM_SUM"] > 0].head(15)
                         if not by_rest_sum.empty:
                             fig2 = px.bar(by_rest_sum, x="PROBLEM_SUM", y="REST_NAME", orientation="h",
-                                title="💰 Суммы проблемных транзакций по столовым",
+                                title="Суммы проблемных транзакций по столовым",
                                 color="PROBLEM_SUM", color_continuous_scale="YlOrRd",
                                 text=by_rest_sum["PROBLEM_SUM"].apply(lambda x: f"{x:,.0f}₽"),
                                 labels={"PROBLEM_SUM": "Сумма, ₽", "REST_NAME": "Столовая"})
                             fig2.update_traces(textposition="auto")
                             fig2.update_layout(height=max(400, len(by_rest_sum)*30),
                                 yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                            st.plotly_chart(fig2, use_container_width=True)
+                            fix_bar_hover(fig2)
+
+                            st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
                 else:
-                    st.success("🟢 Нет проблемных транзакций по столовым!")
+                    st.success("Нет проблемных транзакций по столовым!")
 
                 # Полная разбивка (включая успешные)
-                with st.expander("📊 Все статусы по столовым"):
+                with st.expander("Все статусы по столовым"):
                     all_pivot = card_by_rest.pivot_table(index="REST_NAME", columns="STATUS",
                         values="CNT", aggfunc="sum", fill_value=0).reset_index()
                     all_pivot = all_pivot.rename(columns={"REST_NAME": "Столовая"})
@@ -4177,25 +4719,25 @@ if page == "⚠️ Проблемы":
             fiscal_ok = int(fs["FISCAL_OK"]) if fs["FISCAL_OK"] else 0
 
             c1, c2, c3, c4, c5 = st.columns(5)
-            with c1: st.metric("🧾 Всего чеков", f"{total:,}")
+            with c1: st.metric("Всего чеков", f"{total:,}")
             with c2: st.metric("✅ Фискализировано", f"{fiscal_ok:,}")
-            with c3: st.metric("❌ Не фискализировано", f"{not_fiscal:,}")
+            with c3: st.metric("Не фискализировано", f"{not_fiscal:,}")
             with c4: st.metric("🗑 Удалённых", f"{deleted:,}")
-            with c5: st.metric("💰 Сумма", f"{active_sum:,} ₽")
+            with c5: st.metric("Сумма", f"{active_sum:,} ₽")
 
             # Предупреждения
             if not_fiscal > 0:
-                st.error(f"🚨 {not_fiscal} чеков НЕ фискализированы! Они не отправлены в ОФД/налоговую.")
+                st.error(f"{not_fiscal} чеков НЕ фискализированы! Они не отправлены в ОФД/налоговую.")
             if bill_errors > 0:
-                st.warning(f"⚠️ {bill_errors} чеков с ошибками печати (BILLERROR)")
+                st.warning(f"{bill_errors} чеков с ошибками печати (BILLERROR)")
             if corrections > 0:
-                st.info(f"📋 {corrections} чеков коррекции")
+                st.info(f"{corrections} чеков коррекции")
             if not_fiscal == 0 and bill_errors == 0 and deleted == 0:
                 st.success(f"✅ Все {fiscal_ok:,} чеков успешно фискализированы")
 
             # По столовым
             st.divider()
-            st.markdown("### 🏢 По столовым и кассам")
+            st.markdown("### По столовым и кассам")
             fiscal_detail = load_fiscal_checks(date_from, date_to)
             if not fiscal_detail.empty:
                 # Сводка по столовым
@@ -4212,16 +4754,18 @@ if page == "⚠️ Проблемы":
                 # Проблемные столовые
                 problems = by_rest[(by_rest["NOT_FISCAL"] > 0) | (by_rest["ERRORS"] > 0) | (by_rest["DELETED"] > 0)]
                 if not problems.empty:
-                    st.markdown("#### ⚠️ Столовые с проблемами")
+                    st.markdown("#### Столовые с проблемами")
                     fig = px.bar(problems, x="NOT_FISCAL", y="REST_NAME", orientation="h",
-                        title="❌ Нефискализированные чеки по столовым",
+                        title="Нефискализированные чеки по столовым",
                         color="NOT_FISCAL", color_continuous_scale="Reds",
                         text="NOT_FISCAL",
                         labels={"NOT_FISCAL": "Не фискализировано", "REST_NAME": "Столовая"})
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(300, len(problems)*30),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 # Полная таблица
                 disp = by_rest.rename(columns={
@@ -4231,7 +4775,7 @@ if page == "⚠️ Проблемы":
                 st.dataframe(disp, use_container_width=True, hide_index=True)
 
                 # Детализация по кассам
-                with st.expander("📋 Детализация по кассам"):
+                with st.expander("Детализация по кассам"):
                     disp_full = fiscal_detail.rename(columns={
                         "REST_NAME": "Столовая", "CASH_NAME": "Касса",
                         "TOTAL_CHECKS": "Всего", "ACTIVE_CHECKS": "Активных",
@@ -4243,11 +4787,11 @@ if page == "⚠️ Проблемы":
             st.info("Нет данных по фискальным чекам за период")
 
 # --- ОТКАЗЫ И ОТМЕНЫ ---
-if page == "❌ Отказы":
-    page_header("Отказы и отмены", "❌")
+if page == "Отказы":
+    page_header("Отказы и отмены")
 
     sub_voids, sub_checks, sub_ops, sub_payments = st.tabs([
-        "🗑️ Удаления блюд", "🧾 Отмены чеков", "⚡ Операции отмен", "💳 Оплаты по типам"
+        "Удаления блюд", "Отмены чеков", "Операции отмен", "Оплаты по типам"
     ])
 
     # ========== ОТКАЗЫ БЛЮД ==========
@@ -4259,10 +4803,10 @@ if page == "❌ Отказы":
             rv = float(ords["TOPAYSUM"].sum()) if not ords.empty else 0
 
             c1,c2,c3,c4 = st.columns(4)
-            with c1: st.metric("❌ Всего отказов", f"{len(voids)}")
+            with c1: st.metric("Всего отказов", f"{len(voids)}")
             with c2: st.metric("💸 Сумма", f"{vs:,.0f} ₽")
             with c3: st.metric("📉 % от выручки", f"{vs/rv*100 if rv else 0:.1f}%")
-            with c4: st.metric("🍽️ Ср. сумма отказа", f"{vs/len(voids):,.0f} ₽" if len(voids) else "—")
+            with c4: st.metric("Ср. сумма отказа", f"{vs/len(voids):,.0f} ₽" if len(voids) else "—")
             st.divider()
 
             view_mode = st.selectbox("Разрез:", ["По причинам","По кассирам","По точкам","По блюдам","Таблица"], key="void_view")
@@ -4275,11 +4819,15 @@ if page == "❌ Отказы":
                     with cl:
                         fig = px.bar(vr.head(10),x="SUM",y="VOID_REASON",orientation="h",title="💸 По сумме",color="SUM",color_continuous_scale="Reds", labels=RU)
                         fig.update_layout(height=400,yaxis=dict(autorange="reversed"),coloraxis_showscale=False,**CHART_THEME)
-                        st.plotly_chart(fig,use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
                     with cr:
-                        fig = px.pie(vr.head(8),values="COUNT",names="VOID_REASON",title="📊 По количеству",hole=0.4, labels=RU)
+                        fig = px.pie(vr.head(8),values="COUNT",names="VOID_REASON",title="По количеству",hole=0.4, labels=RU)
                         fig.update_layout(height=400,**CHART_THEME)
-                        st.plotly_chart(fig,use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
             elif view_mode == "По кассирам":
                 if "CREATOR_NAME" in voids.columns:
@@ -4289,7 +4837,9 @@ if page == "❌ Отказы":
                         st.markdown("#### Кто создаёт отказы")
                         fig = px.bar(by_cr.head(15),x="SUM",y="CREATOR_NAME",orientation="h",title="💸 Сумма отказов по кассирам",color="COUNT",color_continuous_scale="Reds", labels=RU)
                         fig.update_layout(height=500,yaxis=dict(autorange="reversed"),coloraxis_showscale=False,**CHART_THEME)
-                        st.plotly_chart(fig,use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
                 if "AUTHOR_NAME" in voids.columns:
                     by_au = voids.groupby("AUTHOR_NAME").agg(COUNT=("DISHUNI","count"),SUM=("PRLISTSUM","sum")).reset_index().sort_values("SUM",ascending=False)
                     by_au = by_au[by_au["AUTHOR_NAME"].notna()]
@@ -4297,7 +4847,9 @@ if page == "❌ Отказы":
                         st.markdown("#### Кто подтверждает отказы (менеджер)")
                         fig = px.bar(by_au.head(15),x="SUM",y="AUTHOR_NAME",orientation="h",title="✅ По менеджерам",color="COUNT",color_continuous_scale="Oranges", labels=RU)
                         fig.update_layout(height=400,yaxis=dict(autorange="reversed"),coloraxis_showscale=False,**CHART_THEME)
-                        st.plotly_chart(fig,use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
             elif view_mode == "По точкам" and "REST_NAME" in voids.columns:
                 by_rest = voids.groupby("REST_NAME").agg(COUNT=("DISHUNI","count"),SUM=("PRLISTSUM","sum")).reset_index().sort_values("SUM",ascending=False)
@@ -4305,21 +4857,27 @@ if page == "❌ Отказы":
                 if not by_rest.empty:
                     cl,cr = st.columns(2)
                     with cl:
-                        fig = px.bar(by_rest.head(15),x="SUM",y="REST_NAME",orientation="h",title="🏢 По сумме",color="SUM",color_continuous_scale="Reds", labels=RU)
+                        fig = px.bar(by_rest.head(15),x="SUM",y="REST_NAME",orientation="h",title="По сумме",color="SUM",color_continuous_scale="Reds", labels=RU)
                         fig.update_layout(height=500,yaxis=dict(autorange="reversed"),coloraxis_showscale=False,**CHART_THEME)
-                        st.plotly_chart(fig,use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
                     with cr:
-                        fig = px.bar(by_rest.head(15),x="COUNT",y="REST_NAME",orientation="h",title="🏢 По количеству",color="COUNT",color_continuous_scale="Oranges", labels=RU)
+                        fig = px.bar(by_rest.head(15),x="COUNT",y="REST_NAME",orientation="h",title="По количеству",color="COUNT",color_continuous_scale="Oranges", labels=RU)
                         fig.update_layout(height=500,yaxis=dict(autorange="reversed"),coloraxis_showscale=False,**CHART_THEME)
-                        st.plotly_chart(fig,use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
             elif view_mode == "По блюдам" and "DISH_NAME" in voids.columns:
                 by_dish = voids.groupby("DISH_NAME").agg(COUNT=("DISHUNI","count"),SUM=("PRLISTSUM","sum")).reset_index().sort_values("SUM",ascending=False)
                 by_dish = by_dish[by_dish["DISH_NAME"].notna()]
                 if not by_dish.empty:
-                    fig = px.bar(by_dish.head(15),x="SUM",y="DISH_NAME",orientation="h",title="🍕 Какие блюда отказывают",color="COUNT",color_continuous_scale="Reds", labels=RU)
+                    fig = px.bar(by_dish.head(15),x="SUM",y="DISH_NAME",orientation="h",title="Какие блюда отказывают",color="COUNT",color_continuous_scale="Reds", labels=RU)
                     fig.update_layout(height=500,yaxis=dict(autorange="reversed"),coloraxis_showscale=False,**CHART_THEME)
-                    st.plotly_chart(fig,use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
 
             elif view_mode == "Таблица":
                 dc = {"DATETIME":"Дата","REST_NAME":"Точка","DISH_NAME":"Блюдо","VOID_REASON":"Причина",
@@ -4327,7 +4885,7 @@ if page == "❌ Отказы":
                 av = [c for c in dc if c in voids.columns]
                 vd = voids[av].rename(columns={k:v for k,v in dc.items() if k in av})
                 st.dataframe(vd,use_container_width=True,hide_index=True,height=500)
-                st.download_button("📥 CSV",vd.to_csv(index=False).encode("utf-8"),"voids.csv","text/csv",use_container_width=True)
+                st.download_button("CSV",vd.to_csv(index=False).encode("utf-8"),"voids.csv","text/csv",use_container_width=True)
         else:
             st.info("Отказов блюд нет за период")
 
@@ -4363,7 +4921,7 @@ if page == "❌ Отказы":
             total_sum = float(del_checks["TOPAYSUM"].sum()) if "TOPAYSUM" in del_checks.columns else 0
 
             c1,c2,c3 = st.columns(3)
-            with c1: st.metric("🧾 Отменённых чеков", f"{total}")
+            with c1: st.metric("Отменённых чеков", f"{total}")
             with c2: st.metric("💸 Сумма", f"{total_sum:,.0f} ₽")
             with c3:
                 ords = load_orders(date_from, date_to)
@@ -4378,9 +4936,11 @@ if page == "❌ Отказы":
                 by_person = by_person[by_person["DELETE_PERSON_NAME"].notna()]
                 if not by_person.empty:
                     fig = px.bar(by_person, x="SUM", y="DELETE_PERSON_NAME", orientation="h",
-                        title="👤 Кто инициирует отмены чеков", color="COUNT", color_continuous_scale="Reds", labels=RU)
+                        title="Кто инициирует отмены чеков", color="COUNT", color_continuous_scale="Reds", labels=RU)
                     fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             # По менеджеру
             if "DELETE_MANAGER_NAME" in del_checks.columns:
@@ -4392,7 +4952,9 @@ if page == "❌ Отказы":
                     fig = px.bar(by_mgr, x="SUM", y="DELETE_MANAGER_NAME", orientation="h",
                         title="✅ Кто подтверждает отмены (менеджер)", color="COUNT", color_continuous_scale="Oranges", labels=RU)
                     fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             # По точкам
             if "REST_NAME" in del_checks.columns:
@@ -4402,9 +4964,11 @@ if page == "❌ Отказы":
                 by_rest = by_rest[by_rest["REST_NAME"].notna()]
                 if not by_rest.empty:
                     fig = px.bar(by_rest, x="SUM", y="REST_NAME", orientation="h",
-                        title="🏢 Отмены чеков по точкам", color="COUNT", color_continuous_scale="Reds", labels=RU)
+                        title="Отмены чеков по точкам", color="COUNT", color_continuous_scale="Reds", labels=RU)
                     fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             # Таблица
             st.divider()
@@ -4423,9 +4987,9 @@ if page == "❌ Отказы":
             av = [c for c in dc if c in del_checks.columns]
             disp = del_checks[av].rename(columns={k:v for k,v in dc.items() if k in av})
             if "Транзакции отменены" in disp.columns:
-                disp["Транзакции отменены"] = disp["Транзакции отменены"].map({1:"✅ Да", 0:"❌ Нет"}).fillna("—")
+                disp["Транзакции отменены"] = disp["Транзакции отменены"].map({1:"✅ Да", 0:"Нет"}).fillna("—")
             st.dataframe(disp, use_container_width=True, hide_index=True)
-            st.download_button("📥 CSV", disp.to_csv(index=False).encode("utf-8"),
+            st.download_button("CSV", disp.to_csv(index=False).encode("utf-8"),
                 "deleted_checks.csv", "text/csv", use_container_width=True)
         else:
             st.success("✅ Отменённых чеков за период нет — это хорошо!")
@@ -4436,7 +5000,7 @@ if page == "❌ Отказы":
         ops = load_cancel_operations(date_from, date_to)
         if not ops.empty:
             c1,c2 = st.columns(2)
-            with c1: st.metric("⚡ Операций отмен", f"{len(ops)}")
+            with c1: st.metric("Операций отмен", f"{len(ops)}")
             total_diff = float(ops["DIFF"].sum()) if "DIFF" in ops.columns else 0
             with c2: st.metric("💸 Сумма разниц", f"{total_diff:,.0f} ₽")
             st.divider()
@@ -4446,9 +5010,11 @@ if page == "❌ Отказы":
                 by_op = ops.groupby("OPERATION").agg(COUNT=("OPERATION","count")).reset_index().sort_values("COUNT",ascending=False)
                 if not by_op.empty:
                     fig = px.bar(by_op, x="COUNT", y="OPERATION", orientation="h",
-                        title="📊 Типы отмен", color="COUNT", color_continuous_scale="Oranges", labels=RU)
+                        title="Типы отмен", color="COUNT", color_continuous_scale="Oranges", labels=RU)
                     fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             cl,cr = st.columns(2)
             # По кассирам
@@ -4458,9 +5024,11 @@ if page == "❌ Отказы":
                     by_emp = by_emp[by_emp["OPERATOR_NAME"].notna()]
                     if not by_emp.empty:
                         fig = px.bar(by_emp.head(15), x="COUNT", y="OPERATOR_NAME", orientation="h",
-                            title="👤 Отмены по кассирам", color="COUNT", color_continuous_scale="Reds", labels=RU)
+                            title="Отмены по кассирам", color="COUNT", color_continuous_scale="Reds", labels=RU)
                         fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             # По точкам
             with cr:
@@ -4469,9 +5037,11 @@ if page == "❌ Отказы":
                     by_rest = by_rest[by_rest["REST_NAME"].notna()]
                     if not by_rest.empty:
                         fig = px.bar(by_rest.head(15), x="COUNT", y="REST_NAME", orientation="h",
-                            title="🏢 Отмены по точкам", color="COUNT", color_continuous_scale="Oranges", labels=RU)
+                            title="Отмены по точкам", color="COUNT", color_continuous_scale="Oranges", labels=RU)
                         fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             # Таблица
             st.divider()
@@ -4488,8 +5058,8 @@ if page == "❌ Отказы":
     with sub_payments:
         pay_br = load_payments_by_type(date_from, date_to)
         if not pay_br.empty:
-            pay_map = {0:"💵 Наличные",1:"💳 Банк. карта",2:"🏨 Карта отеля",3:"🎫 Плат. карта",
-                       4:"📤 Искл. из доходов",5:"🏦 Безнал",6:"🎟️ Купон",7:"🔄 Выкуп"}
+            pay_map = {0:"💵 Наличные",1:"Банк. карта",2:"🏨 Карта отеля",3:"🎫 Плат. карта",
+                       4:"📤 Искл. из доходов",5:"🏦 Безнал",6:"🎟️ Купон",7:"Выкуп"}
             pay_br["PAY_TYPE"] = pay_br["PAYLINETYPE"].map(pay_map).fillna("Другое")
 
             # Общие метрики по типам
@@ -4498,27 +5068,31 @@ if page == "❌ Отказы":
             total_pay = float(by_type["SUM"].sum())
 
             c1,c2,c3 = st.columns(3)
-            with c1: st.metric("💳 Всего оплат", f'{int(by_type["COUNT"].sum()):,}')
-            with c2: st.metric("💰 Общая сумма", f"{total_pay:,.0f} ₽")
+            with c1: st.metric("Всего оплат", f'{int(by_type["COUNT"].sum()):,}')
+            with c2: st.metric("Общая сумма", f"{total_pay:,.0f} ₽")
             with c3:
-                card_sum = float(by_type[by_type["PAY_TYPE"]=="💳 Банк. карта"]["SUM"].sum()) if "💳 Банк. карта" in by_type["PAY_TYPE"].values else 0
-                st.metric("💳 Доля карт", f"{card_sum/total_pay*100:.1f}%" if total_pay else "—")
+                card_sum = float(by_type[by_type["PAY_TYPE"]=="Банк. карта"]["SUM"].sum()) if "Банк. карта" in by_type["PAY_TYPE"].values else 0
+                st.metric("Доля карт", f"{card_sum/total_pay*100:.1f}%" if total_pay else "—")
             st.divider()
 
             cl,cr = st.columns(2)
             with cl:
-                fig = px.pie(by_type, values="SUM", names="PAY_TYPE", title="📊 Структура оплат", hole=0.4, labels=RU)
+                fig = px.pie(by_type, values="SUM", names="PAY_TYPE", title="Структура оплат", hole=0.4, labels=RU)
                 fig.update_layout(height=400, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
             with cr:
                 fig = px.bar(by_type, x="SUM", y="PAY_TYPE", orientation="h",
-                    title="💰 Суммы по типам оплат", color="SUM", color_continuous_scale="Tealgrn", labels=RU)
+                    title="Суммы по типам оплат", color="SUM", color_continuous_scale="Tealgrn", labels=RU)
                 fig.update_layout(height=400, yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             # По кассирам и типам
             st.divider()
-            st.markdown("#### 👤 Кассиры по типам оплат")
+            st.markdown("#### Кассиры по типам оплат")
             selected_type = st.selectbox("Тип оплаты:", ["Все"] + by_type["PAY_TYPE"].tolist())
             if selected_type == "Все":
                 cashier_data = pay_br.groupby("CASHIER_NAME").agg(
@@ -4531,11 +5105,13 @@ if page == "❌ Отказы":
 
             if not cashier_data.empty:
                 fig = px.bar(cashier_data.head(20), x="SUM", y="CASHIER_NAME", orientation="h",
-                    title=f"💰 Кассиры: {selected_type}", color="COUNT", color_continuous_scale="Viridis",
+                    title=f"Кассиры: {selected_type}", color="COUNT", color_continuous_scale="Viridis",
                     hover_data={"COUNT":True,"SUM":":.0f"}, labels=RU)
                 fig.update_layout(height=max(400,min(len(cashier_data),20)*30), yaxis=dict(autorange="reversed"),
                     coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 st.dataframe(cashier_data.rename(columns={"CASHIER_NAME":"Кассир","COUNT":"Операций","SUM":"Сумма"}),
                     use_container_width=True, hide_index=True)
@@ -4543,8 +5119,8 @@ if page == "❌ Отказы":
             st.info("Нет данных по оплатам")
 
 # --- ЗАКАЗЫ ---
-if page == "📋 Заказы":
-    page_header("Заказы", "📋")
+if page == "Заказы":
+    page_header("Заказы")
     ot=load_orders(date_from,date_to)
     if not ot.empty:
         cm={"OPENTIME":"Открыт","ENDSERVICE":"Закрыт","TABLENAME":"Стол","GUESTSCOUNT":"Гости","TOPAYSUM":"К оплате","PAIDSUM":"Оплачено","DISCOUNTSUM":"Скидка","TOTALDISHPIECES":"Блюд"}
@@ -4552,27 +5128,27 @@ if page == "📋 Заказы":
         dp=ot[av].rename(columns={k:v for k,v in cm.items() if k in av})
         st.markdown(f"### Заказы ({len(dp)})")
         st.dataframe(dp,use_container_width=True,hide_index=True,height=500)
-        st.download_button("📥 CSV",dp.to_csv(index=False).encode("utf-8"),"orders.csv","text/csv",use_container_width=True)
+        st.download_button("CSV",dp.to_csv(index=False).encode("utf-8"),"orders.csv","text/csv",use_container_width=True)
 
 # ============================================================
 # STOREHOUSE СТРАНИЦЫ (REST API)
 # ============================================================
 
 # --- ОСТАТКИ ---
-if page == "📦 Склад":
-    page_header("Склад", "📦")
+if page == "Склад":
+    page_header("Склад")
     st.caption(f"StoreHouse API: {SH_API['url']} · Период: {date_from} — {date_to}")
 
     d1_str = str(date_from)
     d2_str = str(date_to)
 
     sub_overview, sub_stock, sub_incoming, sub_transfers, sub_goods_tab, sub_structure, sub_debug = st.tabs([
-        "🗺️ Обзор", "📊 Остатки", "📥 Приход", "🔀 Перемещения",
-        "📦 Товары", "🏗️ Структура", "🔧 Отладка"])
+        "Обзор", "Остатки", "Приход", "Перемещения",
+        "Товары", "🏗️ Структура", "🔧 Отладка"])
 
     # ==================== ОБЗОР ====================
     with sub_overview:
-        st.markdown("### 🗺️ Обзор складской системы")
+        st.markdown("### Обзор складской системы")
 
         # Загружаем базовые справочники
         divs_o, _ = sh_load_divisions()
@@ -4586,28 +5162,28 @@ if page == "📦 Склад":
         n_goods = len(goods_o) if not goods_o.empty else 0
 
         c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric("🏢 Подразделений", f"{n_divs}")
-        with c2: st.metric("🏪 Складов", f"{n_deps}")
-        with c3: st.metric("📦 Товаров", f"{n_goods:,}")
-        with c4: st.metric("🗂️ Категорий", f"{n_cats}")
+        with c1: st.metric("Подразделений", f"{n_divs}")
+        with c2: st.metric("Складов", f"{n_deps}")
+        with c3: st.metric("Товаров", f"{n_goods:,}")
+        with c4: st.metric("Категорий", f"{n_cats}")
 
         st.divider()
 
         # Пробуем загрузить сводку по приходным за период
-        st.markdown(f"#### 📥 Приходные накладные за {d1_str} — {d2_str}")
+        st.markdown(f"#### Приходные накладные за {d1_str} — {d2_str}")
         list_df, list_err = sh_load_gdoc0_ext_list(d1_str, d2_str)
         if list_err:
-            st.warning(f"⚠️ GDoc0ExtList: {list_err}")
+            st.warning(f"GDoc0ExtList: {list_err}")
         elif not list_df.empty:
             st.success(f"✅ {len(list_df)} приходных накладных за период")
         else:
             st.info("Нет приходных накладных за период")
 
         # Пробуем перемещения
-        st.markdown(f"#### 🔀 Перемещения за {d1_str} — {d2_str}")
+        st.markdown(f"#### Перемещения за {d1_str} — {d2_str}")
         tr_list, tr_err = sh_load_gdoc1_5_list(d1_str, d2_str, doc_type=4)
         if tr_err:
-            st.warning(f"⚠️ GDoc1_5LstDocs type=4: {tr_err}")
+            st.warning(f"GDoc1_5LstDocs type=4: {tr_err}")
         elif not tr_list.empty:
             st.success(f"✅ {len(tr_list)} перемещений за период")
         else:
@@ -4642,35 +5218,37 @@ if page == "📦 Склад":
                 tree_data["count"] = 1
                 if not tree_data.empty:
                     fig = px.treemap(tree_data, path=["Подразделение", "Склад"], values="count",
-                        title="🗺️ Карта: подразделения → склады",
+                        title="Карта: подразделения → склады",
                         color_discrete_sequence=px.colors.qualitative.Set3, labels=RU)
                     fig.update_layout(height=500, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         # Статус API
         st.divider()
-        st.markdown("#### 🔌 Статус доступных данных")
+        st.markdown("#### Статус данных")
         status_rows = [
-            {"Источник": "📥 Приходные (GDoc0ExtList)", "Статус": "✅" if not list_err else "⚠️", "Деталь": f"{len(list_df)} документов" if not list_err and not list_df.empty else str(list_err or "нет данных")},
-            {"Источник": "🔀 Перемещения (GDoc1_5LstDocs type=4)", "Статус": "✅" if not tr_err else "⚠️", "Деталь": f"{len(tr_list)} документов" if not tr_err and not tr_list.empty else str(tr_err or "нет данных")},
-            {"Источник": "📦 Товары (GoodsTree)", "Статус": "✅" if n_goods > 0 else "❌", "Деталь": f"{n_goods:,} товаров"},
-            {"Источник": "🏪 Склады (Departs)", "Статус": "✅" if n_deps > 0 else "❌", "Деталь": f"{n_deps} складов"},
-            {"Источник": "🏢 Подразделения (Divisions)", "Статус": "✅" if n_divs > 0 else "❌", "Деталь": f"{n_divs} подразделений"},
-            {"Источник": "📊 Остатки (GRemns)", "Статус": "✅", "Деталь": "Работает! dept=0 общие, dept=1 по складам"},
+            {"Источник": "Приходные (GDoc0ExtList)", "Статус": "✅" if not list_err else "⚠️", "Деталь": f"{len(list_df)} документов" if not list_err and not list_df.empty else str(list_err or "нет данных")},
+            {"Источник": "Перемещения (GDoc1_5LstDocs type=4)", "Статус": "✅" if not tr_err else "⚠️", "Деталь": f"{len(tr_list)} документов" if not tr_err and not tr_list.empty else str(tr_err or "нет данных")},
+            {"Источник": "Товары (GoodsTree)", "Статус": "✅" if n_goods > 0 else "❌", "Деталь": f"{n_goods:,} товаров"},
+            {"Источник": "Склады (Departs)", "Статус": "✅" if n_deps > 0 else "❌", "Деталь": f"{n_deps} складов"},
+            {"Источник": "Подразделения (Divisions)", "Статус": "✅" if n_divs > 0 else "❌", "Деталь": f"{n_divs} подразделений"},
+            {"Источник": "Остатки (GRemns)", "Статус": "✅", "Деталь": "Работает! dept=0 общие, dept=1 по складам"},
             {"Источник": "📑 Расходные (type=1)", "Статус": "🔒", "Деталь": "Ошибка 5 — нет прав"},
-            {"Источник": "📋 Инвентаризации (type=5)", "Статус": "🔒", "Деталь": "Ошибка 5 — нет прав"},
+            {"Источник": "Инвентаризации (type=5)", "Статус": "🔒", "Деталь": "Ошибка 5 — нет прав"},
         ]
         st.dataframe(pd.DataFrame(status_rows), use_container_width=True, hide_index=True)
 
     # ==================== ОСТАТКИ ====================
     with sub_stock:
-        st.markdown(f"### 📊 Остатки товаров на {d2_str}")
+        st.markdown(f"### Остатки товаров на {d2_str}")
         st.caption("GRemns API → текущие остатки по складам с суммами")
 
         stock_df, stock_err = sh_load_stock(d2_str, by_depart=True)
 
         if stock_err:
-            st.warning(f"⚠️ {stock_err}")
+            st.warning(f"{stock_err}")
         elif not stock_df.empty:
             n_items = len(stock_df)
             total_amount = stock_df["AMOUNT"].sum() if "AMOUNT" in stock_df.columns else 0
@@ -4679,24 +5257,24 @@ if page == "📦 Склад":
             n_departs = stock_df["DEPART"].nunique() if "DEPART" in stock_df.columns else 0
 
             c1, c2, c3, c4 = st.columns(4)
-            with c1: st.metric("🏪 Складов", f"{n_departs}")
-            with c2: st.metric("🏷️ Товаров", f"{n_products:,}")
-            with c3: st.metric("💰 Стоимость", f"{total_amount:,.0f} ₽")
-            with c4: st.metric("📦 Позиций", f"{n_items:,}")
+            with c1: st.metric("Складов", f"{n_departs}")
+            with c2: st.metric("Товаров", f"{n_products:,}")
+            with c3: st.metric("Стоимость", f"{total_amount:,.0f} ₽")
+            with c4: st.metric("Позиций", f"{n_items:,}")
 
             st.divider()
 
             # Переключатель отчётов
-            stock_mode = st.radio("📊 Отчёт:", [
-                "🏪 По складам",
-                "🏷️ По товарам",
-                "📋 Товары на складе"
+            stock_mode = st.radio("Отчёт:", [
+                "По складам",
+                "По товарам",
+                "Товары на складе"
             ], horizontal=True, key="stock_mode")
 
             st.divider()
 
             # ======= ПО СКЛАДАМ =======
-            if stock_mode.startswith("🏪") and "DEPART" in stock_df.columns:
+            if stock_mode == "По складам" and "DEPART" in stock_df.columns:
                 by_dep = stock_df.groupby("DEPART").agg(
                     PRODUCTS=("PRODUCT_NAME", "nunique"),
                     TOTAL_QTY=("QTY", "sum"),
@@ -4704,31 +5282,37 @@ if page == "📦 Склад":
                 ).reset_index().sort_values("TOTAL_AMOUNT", ascending=False)
 
                 fig = px.bar(by_dep, x="TOTAL_AMOUNT", y="DEPART", orientation="h",
-                    title="💰 Стоимость остатков по складам",
+                    title="Стоимость остатков по складам",
                     color="TOTAL_AMOUNT", color_continuous_scale="Viridis",
                     text=by_dep["TOTAL_AMOUNT"].apply(lambda x: f"{x:,.0f}₽"),
                     labels={"TOTAL_AMOUNT": "Сумма, ₽", "DEPART": "Склад"})
                 fig.update_traces(textposition="auto")
                 fig.update_layout(height=max(400, len(by_dep)*32),
                     yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 cl, cr = st.columns(2)
                 with cl:
                     fig2 = px.pie(by_dep, values="TOTAL_AMOUNT", names="DEPART",
-                        title="🥧 Доля остатков по складам", hole=0.4)
+                        title="Доля остатков по складам", hole=0.4)
                     fig2.update_layout(height=400, **CHART_THEME)
-                    st.plotly_chart(fig2, use_container_width=True)
+                    fix_bar_hover(fig2)
+
+                    st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
                 with cr:
                     fig3 = px.bar(by_dep, x="PRODUCTS", y="DEPART", orientation="h",
-                        title="📦 Кол-во товаров на складе",
+                        title="Кол-во товаров на складе",
                         color="PRODUCTS", color_continuous_scale="Tealgrn",
                         text="PRODUCTS",
                         labels={"PRODUCTS": "Товаров", "DEPART": "Склад"})
                     fig3.update_traces(textposition="auto")
                     fig3.update_layout(height=max(400, len(by_dep)*32),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig3, use_container_width=True)
+                    fix_bar_hover(fig3)
+
+                    st.plotly_chart(fig3, use_container_width=True, config={"displayModeBar":False})
 
                 # Таблица
                 st.divider()
@@ -4738,7 +5322,7 @@ if page == "📦 Склад":
                 st.dataframe(disp, use_container_width=True, hide_index=True)
 
             # ======= ПО ТОВАРАМ =======
-            elif stock_mode.startswith("🏷️") and "PRODUCT_NAME" in stock_df.columns:
+            elif stock_mode == "По товарам" and "PRODUCT_NAME" in stock_df.columns:
                 by_prod = stock_df.groupby("PRODUCT_NAME").agg(
                     TOTAL_QTY=("QTY", "sum"),
                     TOTAL_AMOUNT=("AMOUNT", "sum"),
@@ -4750,14 +5334,16 @@ if page == "📦 Склад":
 
                 top30 = by_prod.head(30)
                 fig = px.bar(top30, x="TOTAL_AMOUNT", y="PRODUCT_NAME", orientation="h",
-                    title="💰 Топ-30 товаров по стоимости остатков",
+                    title="Топ-30 товаров по стоимости остатков",
                     color="TOTAL_AMOUNT", color_continuous_scale="YlOrRd",
                     text=top30["TOTAL_AMOUNT"].apply(lambda x: f"{x:,.0f}₽"),
                     labels={"TOTAL_AMOUNT": "Сумма, ₽", "PRODUCT_NAME": "Товар"})
                 fig.update_traces(textposition="auto")
                 fig.update_layout(height=max(500, len(top30)*25),
                     yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 st.divider()
                 show_cols_s = [c for c in ["PRODUCT_NAME","TOTAL_QTY","TOTAL_AMOUNT","STORES","UNIT"] if c in by_prod.columns]
@@ -4765,39 +5351,41 @@ if page == "📦 Склад":
                 col_names = {"PRODUCT_NAME":"Товар","TOTAL_QTY":"Кол-во","TOTAL_AMOUNT":"Сумма ₽","STORES":"Складов","UNIT":"Ед."}
                 disp_p = disp_p.rename(columns=col_names)
                 st.dataframe(disp_p, use_container_width=True, hide_index=True, height=500)
-                st.download_button("📥 CSV остатков", by_prod.to_csv(index=False).encode("utf-8"),
+                st.download_button("CSV остатков", by_prod.to_csv(index=False).encode("utf-8"),
                     "stock.csv", "text/csv", use_container_width=True)
 
             # ======= ТОВАРЫ НА СКЛАДЕ =======
-            elif stock_mode.startswith("📋") and "DEPART" in stock_df.columns:
+            elif stock_mode == "Товары на складе" and "DEPART" in stock_df.columns:
                 departs_list = sorted(stock_df["DEPART"].unique().tolist())
-                selected_store = st.selectbox("🏪 Выберите склад:", departs_list, key="stock_store_sel")
+                selected_store = st.selectbox("Выберите склад:", departs_list, key="stock_store_sel")
                 filtered_s = stock_df[stock_df["DEPART"] == selected_store].copy()
 
                 if not filtered_s.empty:
                     c1, c2, c3 = st.columns(3)
-                    with c1: st.metric("🏷️ Товаров", f"{len(filtered_s):,}")
-                    with c2: st.metric("💰 Сумма", f"{filtered_s['AMOUNT'].sum():,.0f} ₽")
-                    with c3: st.metric("📦 Кол-во", f"{filtered_s['QTY'].sum():,.1f}")
+                    with c1: st.metric("Товаров", f"{len(filtered_s):,}")
+                    with c2: st.metric("Сумма", f"{filtered_s['AMOUNT'].sum():,.0f} ₽")
+                    with c3: st.metric("Кол-во", f"{filtered_s['QTY'].sum():,.1f}")
 
                     filtered_s = filtered_s.sort_values("AMOUNT", ascending=False)
                     top_s = filtered_s.head(20)
                     fig = px.bar(top_s, x="AMOUNT", y="PRODUCT_NAME", orientation="h",
-                        title=f"💰 Остатки — {selected_store}",
+                        title=f"Остатки — {selected_store}",
                         color="AMOUNT", color_continuous_scale="Viridis",
                         text=top_s["AMOUNT"].apply(lambda x: f"{x:,.0f}₽"),
                         labels={"AMOUNT": "Сумма, ₽", "PRODUCT_NAME": "Товар"})
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(400, len(top_s)*28),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     st.divider()
                     show_s = [c for c in ["PRODUCT_NAME","QTY","AMOUNT","UNIT"] if c in filtered_s.columns]
                     disp_fs = filtered_s[show_s].copy()
                     disp_fs = disp_fs.rename(columns={"PRODUCT_NAME":"Товар","QTY":"Кол-во","AMOUNT":"Сумма ₽","UNIT":"Ед."})
                     st.dataframe(disp_fs, use_container_width=True, hide_index=True, height=500)
-                    st.download_button("📥 CSV", filtered_s.to_csv(index=False).encode("utf-8"),
+                    st.download_button("CSV", filtered_s.to_csv(index=False).encode("utf-8"),
                         f"stock_{selected_store.replace(' ','_')}.csv", "text/csv", use_container_width=True)
                 else:
                     st.info(f"Нет остатков на складе «{selected_store}»")
@@ -4806,7 +5394,7 @@ if page == "📦 Склад":
 
     # ==================== ПРИХОД ====================
     with sub_incoming:
-        st.markdown(f"### 📥 Приходные накладные ({d1_str} — {d2_str})")
+        st.markdown(f"### Приходные накладные ({d1_str} — {d2_str})")
         st.caption("Одна загрузка → три отчёта: по товарам, по складам, по товарам в каждом складе")
 
         progress_ph = st.empty()
@@ -4823,7 +5411,7 @@ if page == "📦 Склад":
         inc_err = st.session_state.get("_inc_err", None)
 
         if inc_err:
-            st.warning(f"⚠️ {inc_err}")
+            st.warning(f"{inc_err}")
         elif not items_df.empty or not docs_df.empty:
             n_items = len(items_df)
             n_docs = len(docs_df)
@@ -4832,11 +5420,11 @@ if page == "📦 Склад":
             n_departs = docs_df["DEPART"].nunique() if not docs_df.empty and "DEPART" in docs_df.columns else 0
 
             c1, c2, c3, c4, c5 = st.columns(5)
-            with c1: st.metric("📄 Накладных", f"{n_docs}")
-            with c2: st.metric("📦 Позиций", f"{n_items:,}")
-            with c3: st.metric("🏷️ Товаров", f"{n_products:,}")
-            with c4: st.metric("🏪 Складов", f"{n_departs}")
-            with c5: st.metric("💰 Сумма", f"{total_sum:,.0f} ₽")
+            with c1: st.metric("Накладных", f"{n_docs}")
+            with c2: st.metric("Позиций", f"{n_items:,}")
+            with c3: st.metric("Товаров", f"{n_products:,}")
+            with c4: st.metric("Складов", f"{n_departs}")
+            with c5: st.metric("Сумма", f"{total_sum:,.0f} ₽")
 
             # Диагностика колонок GDoc0
             gdoc0_cols = st.session_state.get("_gdoc0_all_cols", [])
@@ -4845,16 +5433,16 @@ if page == "📦 Склад":
                     st.caption(f"{len(gdoc0_cols)} колонок: {gdoc0_cols}")
 
             # ---- Три отчёта внутри одного таба ----
-            rpt_mode = st.radio("📊 Отчёт:", [
-                "🏷️ По товарам (закупочные цены)",
-                "🏪 По складам (суммы прихода)",
-                "📋 Товары в каждом складе"
+            rpt_mode = st.radio("Отчёт:", [
+                "По товарам (закупочные цены)",
+                "По складам (суммы прихода)",
+                "Товары в каждом складе"
             ], horizontal=True, key="inc_report_mode")
 
             st.divider()
 
             # ======================== ПО ТОВАРАМ ========================
-            if rpt_mode.startswith("🏷️") and not items_df.empty:
+            if rpt_mode == "По товарам (закупочные цены)" and not items_df.empty:
                 # Группируем: товар → средневзвешенная цена, суммы
                 grouped = items_df.groupby("PRODUCT_NAME").agg(
                     TOTAL_QTY=("QTY", "sum"),
@@ -4872,32 +5460,38 @@ if page == "📦 Склад":
                 # Топ-20
                 top20 = grouped.head(20)
                 fig = px.bar(top20, x="TOTAL_AMOUNT", y="PRODUCT_NAME", orientation="h",
-                    title="📊 Топ-20 товаров по сумме закупок",
+                    title="Топ-20 товаров по сумме закупок",
                     color="AVG_PURCHASE_PRICE", color_continuous_scale="YlOrRd",
                     text=top20["TOTAL_AMOUNT"].apply(lambda x: f"{x:,.0f}₽"),
                     labels={"TOTAL_AMOUNT": "Сумма, ₽", "PRODUCT_NAME": "Товар", "AVG_PURCHASE_PRICE": "Ø Цена"})
                 fig.update_traces(textposition="auto")
                 fig.update_layout(height=max(450, len(top20)*28),
                     yaxis=dict(autorange="reversed"), **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 # Распределение
                 cl, cr = st.columns(2)
                 with cl:
                     fig = px.histogram(grouped, x="AVG_PURCHASE_PRICE", nbins=40,
-                        title="📊 Распределение закупочных цен",
+                        title="Распределение закупочных цен",
                         labels={"AVG_PURCHASE_PRICE": "Средняя цена, ₽"},
                         color_discrete_sequence=["#00ff6a"])
                     fig.update_layout(height=350, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
                 with cr:
                     fig = px.scatter(grouped.head(100), x="AVG_PURCHASE_PRICE", y="TOTAL_AMOUNT",
                         hover_name="PRODUCT_NAME", size="TOTAL_QTY",
-                        title="💰 Цена vs Объём закупок",
+                        title="Цена vs Объём закупок",
                         labels={"AVG_PURCHASE_PRICE": "Ø Цена, ₽", "TOTAL_AMOUNT": "Сумма, ₽", "TOTAL_QTY": "Кол-во"},
                         color_discrete_sequence=["#00e5ff"])
                     fig.update_layout(height=350, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 # Таблица
                 st.divider()
@@ -4905,11 +5499,11 @@ if page == "📦 Склад":
                 display_gp = grouped[show_cols].copy()
                 display_gp.columns = ["Товар","Ø Цена ₽","Общ. кол-во","Общ. сумма ₽","Накладных","Ед."][:len(show_cols)]
                 st.dataframe(display_gp, use_container_width=True, hide_index=True, height=500)
-                st.download_button("📥 CSV закупок", grouped.to_csv(index=False).encode("utf-8"),
+                st.download_button("CSV закупок", grouped.to_csv(index=False).encode("utf-8"),
                     "purchases.csv", "text/csv", use_container_width=True)
 
             # ======================== ПО СКЛАДАМ ========================
-            elif rpt_mode.startswith("🏪") and not docs_df.empty and "DEPART" in docs_df.columns:
+            elif rpt_mode == "По складам (суммы прихода)" and not docs_df.empty and "DEPART" in docs_df.columns:
                 by_dep = docs_df.groupby("DEPART").agg(
                     DOC_COUNT=("DOC_RID", "count"),
                     TOTAL_AMOUNT=("TOTAL_AMOUNT", "sum"),
@@ -4918,36 +5512,42 @@ if page == "📦 Склад":
 
                 # Топ складов
                 fig = px.bar(by_dep, x="TOTAL_AMOUNT", y="DEPART", orientation="h",
-                    title="💰 Сумма прихода по складам",
+                    title="Сумма прихода по складам",
                     color="TOTAL_AMOUNT", color_continuous_scale="Viridis",
                     text=by_dep["TOTAL_AMOUNT"].apply(lambda x: f"{x:,.0f}₽"),
                     labels={"TOTAL_AMOUNT": "Сумма, ₽", "DEPART": "Склад"})
                 fig.update_traces(textposition="auto")
                 fig.update_layout(height=max(400, len(by_dep)*30),
                     yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 cl, cr = st.columns(2)
                 with cl:
                     fig = px.bar(by_dep, x="DOC_COUNT", y="DEPART", orientation="h",
-                        title="📄 Кол-во накладных по складам",
+                        title="Кол-во накладных по складам",
                         color="DOC_COUNT", color_continuous_scale="Tealgrn",
                         text="DOC_COUNT",
                         labels={"DOC_COUNT": "Накладных", "DEPART": "Склад"})
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(350, len(by_dep)*28),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
                 with cr:
                     fig = px.pie(by_dep, values="TOTAL_AMOUNT", names="DEPART",
-                        title="🥧 Доля прихода по складам", hole=0.4, labels=RU)
+                        title="Доля прихода по складам", hole=0.4, labels=RU)
                     fig.update_layout(height=max(350, len(by_dep)*28), **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 # Поставщики
                 if "SUPPLIER" in docs_df.columns and docs_df["SUPPLIER"].str.strip().ne("").sum() > 0:
                     st.divider()
-                    st.markdown("#### 🤝 Приход по поставщикам")
+                    st.markdown("#### По поставщикам")
                     sup_data = docs_df[docs_df["SUPPLIER"].str.strip().ne("")]
                     by_sup = sup_data.groupby("SUPPLIER").agg(
                         DOC_COUNT=("DOC_RID", "count"),
@@ -4955,14 +5555,16 @@ if page == "📦 Склад":
                     ).reset_index().sort_values("TOTAL_AMOUNT", ascending=False)
                     top_sup = by_sup.head(20)
                     fig = px.bar(top_sup, x="TOTAL_AMOUNT", y="SUPPLIER", orientation="h",
-                        title="💰 Топ-20 поставщиков по сумме",
+                        title="Топ-20 поставщиков по сумме",
                         color="TOTAL_AMOUNT", color_continuous_scale="YlOrRd",
                         text=top_sup["TOTAL_AMOUNT"].apply(lambda x: f"{x:,.0f}₽"),
                         labels={"TOTAL_AMOUNT": "Сумма, ₽", "SUPPLIER": "Поставщик"})
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(400, len(top_sup)*28),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 # Таблица по складам
                 st.divider()
@@ -4978,15 +5580,15 @@ if page == "📦 Склад":
                               "DOC_DATE": "Дата", "ITEMS_COUNT": "Позиций", "TOTAL_AMOUNT": "Сумма ₽"}
                 dep_show = dep_show.rename(columns={k:v for k,v in col_rename.items() if k in dep_show.columns})
                 st.dataframe(dep_show, use_container_width=True, hide_index=True, height=400)
-                st.download_button("📥 CSV по складам", docs_df.to_csv(index=False).encode("utf-8"),
+                st.download_button("CSV по складам", docs_df.to_csv(index=False).encode("utf-8"),
                     "incoming_by_depart.csv", "text/csv", use_container_width=True)
 
             # ======================== ТОВАРЫ В КАЖДОМ СКЛАДЕ ========================
-            elif rpt_mode.startswith("📋") and not items_df.empty and "DEPART" in items_df.columns:
+            elif rpt_mode == "Товары в каждом складе" and not items_df.empty and "DEPART" in items_df.columns:
                 departs = sorted(items_df["DEPART"].dropna().unique().tolist())
                 departs = [d for d in departs if d.strip()]
                 if departs:
-                    selected_dep = st.selectbox("🏪 Выберите склад:", ["Все склады"] + departs, key="dep_sel")
+                    selected_dep = st.selectbox("Выберите склад:", ["Все склады"] + departs, key="dep_sel")
                     if selected_dep == "Все склады":
                         filtered = items_df
                     else:
@@ -5002,13 +5604,13 @@ if page == "📦 Склад":
                     by_prod = by_prod.sort_values("TOTAL_AMOUNT", ascending=False).reset_index(drop=True)
 
                     c1, c2, c3 = st.columns(3)
-                    with c1: st.metric("🏷️ Товаров", f"{len(by_prod):,}")
-                    with c2: st.metric("💰 Сумма", f"{by_prod['TOTAL_AMOUNT'].sum():,.0f} ₽")
-                    with c3: st.metric("📄 Накладных", f"{by_prod['DOC_COUNT'].sum()}")
+                    with c1: st.metric("Товаров", f"{len(by_prod):,}")
+                    with c2: st.metric("Сумма", f"{by_prod['TOTAL_AMOUNT'].sum():,.0f} ₽")
+                    with c3: st.metric("Накладных", f"{by_prod['DOC_COUNT'].sum()}")
 
                     # Топ-20 товаров на этом складе
                     top_dep = by_prod.head(20)
-                    title_txt = f"📊 Топ-20 товаров — {selected_dep}" if selected_dep != "Все склады" else "📊 Топ-20 товаров (все склады)"
+                    title_txt = f"Топ-20 товаров — {selected_dep}" if selected_dep != "Все склады" else "Топ-20 товаров (все склады)"
                     fig = px.bar(top_dep, x="TOTAL_AMOUNT", y="PRODUCT_NAME", orientation="h",
                         title=title_txt,
                         color="AVG_PRICE", color_continuous_scale="YlOrRd",
@@ -5017,12 +5619,14 @@ if page == "📦 Склад":
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(400, len(top_dep)*28),
                         yaxis=dict(autorange="reversed"), **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     # Сравнение складов по этому товару
                     if selected_dep != "Все склады":
                         st.divider()
-                        st.markdown(f"#### 🔍 Уникальные товары на складе «{selected_dep}»")
+                        st.markdown(f"#### Уникальные товары на складе «{selected_dep}»")
                         # Товары, которые есть только на этом складе
                         all_prods = set(items_df["PRODUCT_NAME"].unique())
                         dep_prods = set(filtered["PRODUCT_NAME"].unique())
@@ -5039,7 +5643,7 @@ if page == "📦 Склад":
                     disp_prod.columns = ["Товар", "Кол-во", "Сумма ₽", "Накладных", "Ø Цена ₽"]
                     st.dataframe(disp_prod, use_container_width=True, hide_index=True, height=500)
                     csv_name = f"products_{selected_dep.replace(' ','_')}.csv" if selected_dep != "Все склады" else "products_all.csv"
-                    st.download_button("📥 CSV", by_prod.to_csv(index=False).encode("utf-8"),
+                    st.download_button("CSV", by_prod.to_csv(index=False).encode("utf-8"),
                         csv_name, "text/csv", use_container_width=True)
                 else:
                     st.warning("Склады не определены в заголовках накладных")
@@ -5053,7 +5657,7 @@ if page == "📦 Склад":
 
     # ==================== ПЕРЕМЕЩЕНИЯ ====================
     with sub_transfers:
-        st.markdown(f"### 🔀 Внутренние перемещения ({d1_str} — {d2_str})")
+        st.markdown(f"### Внутренние перемещения ({d1_str} — {d2_str})")
         st.caption("GDoc1_5LstDocs type=4 → список перемещений → GDoc4 → товары + склады")
 
         progress_tr = st.empty()
@@ -5069,19 +5673,19 @@ if page == "📦 Склад":
         tr_err_r = st.session_state.get("_tr_err", None)
 
         if tr_err_r:
-            st.warning(f"⚠️ {tr_err_r}")
+            st.warning(f"{tr_err_r}")
         elif not tr_list_r.empty:
             st.success(f"✅ {len(tr_list_r)} перемещений, {len(tr_items_r)} позиций товаров")
 
             c1, c2, c3 = st.columns(3)
-            with c1: st.metric("📄 Документов", f"{len(tr_list_r)}")
-            with c2: st.metric("📦 Позиций", f"{len(tr_items_r):,}" if not tr_items_r.empty else "0")
+            with c1: st.metric("Документов", f"{len(tr_list_r)}")
+            with c2: st.metric("Позиций", f"{len(tr_items_r):,}" if not tr_items_r.empty else "0")
             with c3:
                 if not tr_items_r.empty and "_DEPART_FROM" in tr_items_r.columns:
                     n_stores = tr_items_r["_DEPART_FROM"].nunique()
-                    st.metric("🏪 Складов-отправителей", f"{n_stores}")
+                    st.metric("Складов-отправителей", f"{n_stores}")
                 else:
-                    st.metric("🏪 Складов", "—")
+                    st.metric("Складов", "—")
 
             if not tr_items_r.empty:
                 st.divider()
@@ -5112,18 +5716,20 @@ if page == "📦 Склад":
                     by_product = tr_items_r[name_col_tr].value_counts().head(20).reset_index()
                     by_product.columns = ["Товар", "Перемещений"]
                     fig = px.bar(by_product, x="Перемещений", y="Товар", orientation="h",
-                        title="📊 Топ-20 товаров по частоте перемещений",
+                        title="Топ-20 товаров по частоте перемещений",
                         color="Перемещений", color_continuous_scale="Viridis",
                         text="Перемещений", labels=RU)
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(400, len(by_product)*28),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 # Матрица перемещений между складами
                 if "_DEPART_FROM" in tr_items_r.columns and "_DEPART_TO" in tr_items_r.columns:
                     st.divider()
-                    st.markdown("#### 🔄 Матрица перемещений (склад → склад)")
+                    st.markdown("#### Матрица перемещений (склад → склад)")
                     matrix = tr_items_r.groupby(["_DEPART_FROM", "_DEPART_TO"]).size().reset_index(name="COUNT")
                     matrix.columns = ["Откуда", "Куда", "Кол-во"]
                     if len(matrix) > 0:
@@ -5131,15 +5737,17 @@ if page == "📦 Склад":
                             title="Интенсивность перемещений",
                             color_continuous_scale="Viridis", labels=RU)
                         fig.update_layout(height=max(400, matrix["Откуда"].nunique()*40), **CHART_THEME)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
                     st.dataframe(matrix.sort_values("Кол-во", ascending=False), use_container_width=True, hide_index=True)
 
                 # Полная таблица перемещений
                 st.divider()
-                st.markdown("#### 📋 Все позиции перемещений")
+                st.markdown("#### Все позиции перемещений")
                 clean_tr = sh_clean_df(tr_items_r)
                 st.dataframe(clean_tr, use_container_width=True, hide_index=True, height=500)
-                st.download_button("📥 CSV перемещений", tr_items_r.to_csv(index=False).encode("utf-8"),
+                st.download_button("CSV перемещений", tr_items_r.to_csv(index=False).encode("utf-8"),
                     "transfers.csv", "text/csv", use_container_width=True)
         else:
             st.info("Нажмите «🚀 Загрузить перемещения» для анализа внутренних перемещений")
@@ -5148,7 +5756,7 @@ if page == "📦 Склад":
     with sub_goods_tab:
         goods, goods_err = sh_load_goods()
         if goods_err:
-            st.warning(f"⚠️ {goods_err}")
+            st.warning(f"{goods_err}")
         elif not goods.empty:
             st.success(f"✅ {len(goods):,} товаров из GoodsTree")
             clean = sh_clean_df(goods)
@@ -5166,9 +5774,9 @@ if page == "📦 Склад":
 
             grp_col = next((c for c in useful_cols if "группа" in c.lower()), None)
             c1, c2, c3 = st.columns(3)
-            with c1: st.metric("📦 Всего товаров", f"{len(clean):,}")
+            with c1: st.metric("Всего товаров", f"{len(clean):,}")
             with c2:
-                if grp_col: st.metric("🗂️ Групп", f"{clean[grp_col].nunique()}")
+                if grp_col: st.metric("Групп", f"{clean[grp_col].nunique()}")
             with c3:
                 name_col_g = next((c for c in useful_cols if "название" in c.lower()), None)
                 if name_col_g:
@@ -5180,18 +5788,20 @@ if page == "📦 Склад":
                 by_grp = clean[grp_col].value_counts().head(20).reset_index()
                 by_grp.columns = ["Группа", "Кол-во товаров"]
                 fig = px.bar(by_grp, x="Кол-во товаров", y="Группа", orientation="h",
-                    title="📊 Топ-20 групп по количеству товаров",
+                    title="Топ-20 групп по количеству товаров",
                     color="Кол-во товаров", color_continuous_scale="Viridis", text="Кол-во товаров", labels=RU)
                 fig.update_traces(textposition="auto")
                 fig.update_layout(height=max(400, min(20, len(by_grp))*30),
                     yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             st.divider()
             st.dataframe(clean[useful_cols], use_container_width=True, hide_index=True, height=500)
-            with st.expander("📋 Все колонки (включая технические)"):
+            with st.expander("Все колонки (включая технические)"):
                 st.dataframe(clean, use_container_width=True, hide_index=True, height=400)
-            st.download_button("📥 CSV", clean[useful_cols].to_csv(index=False).encode("utf-8"),
+            st.download_button("CSV", clean[useful_cols].to_csv(index=False).encode("utf-8"),
                 "sh_goods.csv", "text/csv", use_container_width=True)
         else:
             st.info("GoodsTree вернула пустой результат")
@@ -5204,20 +5814,20 @@ if page == "📦 Склад":
         deps, deps_err = sh_load_departs()
         cats, cats_err = sh_load_goods_categories()
 
-        sub_struct_tab = st.selectbox("Показать:", ["🏢 Подразделения", "🏪 Склады", "🗂️ Категории"], key="struct_sel")
+        sub_struct_tab = st.selectbox("Показать:", ["Подразделения", "Склады", "Категории"], key="struct_sel")
 
-        if sub_struct_tab == "🏢 Подразделения":
+        if sub_struct_tab == "Подразделения":
             if divs_err:
-                st.error(f"❌ Divisions: {divs_err}")
+                st.error(f"Divisions: {divs_err}")
             elif not divs.empty:
                 st.success(f"✅ {len(divs)} подразделений (столовые, буфеты, цеха)")
                 st.dataframe(sh_clean_df(divs), use_container_width=True, hide_index=True, height=500)
             else:
                 st.info("Divisions вернула пустой результат")
 
-        elif sub_struct_tab == "🏪 Склады":
+        elif sub_struct_tab == "Склады":
             if deps_err:
-                st.error(f"❌ Departs: {deps_err}")
+                st.error(f"Departs: {deps_err}")
             elif not deps.empty:
                 st.success(f"✅ {len(deps)} складов/подразделений")
 
@@ -5247,13 +5857,15 @@ if page == "📦 Склад":
                     by_venture.columns = ["Подразделение", "Кол-во складов", "Склады"]
 
                     fig = px.bar(by_venture, x="Кол-во складов", y="Подразделение", orientation="h",
-                        title="🏪 Складов в каждом подразделении",
+                        title="Складов в каждом подразделении",
                         color="Кол-во складов", color_continuous_scale="Viridis",
                         text="Кол-во складов", labels=RU)
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(400, len(by_venture)*35),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     st.divider()
                     st.dataframe(by_venture, use_container_width=True, hide_index=True)
@@ -5263,9 +5875,9 @@ if page == "📦 Склад":
             else:
                 st.info("Departs вернула пустой результат")
 
-        elif sub_struct_tab == "🗂️ Категории":
+        elif sub_struct_tab == "Категории":
             if cats_err:
-                st.error(f"❌ GoodsCategories: {cats_err}")
+                st.error(f"GoodsCategories: {cats_err}")
             elif not cats.empty:
                 st.success(f"✅ {len(cats)} категорий товаров")
                 st.dataframe(sh_clean_df(cats), use_container_width=True, hide_index=True)
@@ -5280,7 +5892,7 @@ if page == "📦 Склад":
             ["Goods", "GoodsCategories", "Departs", "Divisions",
              "GDoc0ExtList", "GDoc1_5LstDocs", "GDoc4", "DocAccSums",
              "GAbcRpt", "FifoDtl"], key="debug_proc")
-        if st.button("🔍 Показать сырой JSON", key="debug_btn"):
+        if st.button("Показать сырой JSON", key="debug_btn"):
             raw_data, raw_err = sh_exec_raw(debug_proc)
             if raw_err:
                 st.error(f"Ошибка: {raw_err}")
@@ -5296,15 +5908,15 @@ if page == "📦 Склад":
                         f" × {len(tbl['values'][0]) if tbl.get('values') else 0} строк")
 
 # --- НАКЛАДНЫЕ ---
-if page == "📄 Накладные":
-    page_header("Накладные и документы", "📄")
+if page == "Накладные":
+    page_header("Накладные")
     st.caption("SQL-база → RID документов → StoreHouse API → детали с товарами")
 
     sub_pipeline, sub_corr, sub_sql = st.tabs([
-        "📄 Документы (SQL+API)", "🤝 Поставщики", "🗄️ SQL-статус"])
+        "Документы (SQL+API)", "Поставщики", "🗄️ SQL-статус"])
 
     with sub_pipeline:
-        with st.spinner("🔄 Загружаю документы из SQL → детали из API..."):
+        with st.spinner("Загружаю документы из SQL → детали из API..."):
             headers_df, items_df = sh_load_all_docs_from_sql()
 
         if not headers_df.empty:
@@ -5312,21 +5924,21 @@ if page == "📄 Накладные":
 
             # Метрики
             c1, c2, c3 = st.columns(3)
-            with c1: st.metric("📄 Документов", f"{len(headers_df)}")
-            with c2: st.metric("📦 Позиций товаров", f"{len(items_df):,}" if not items_df.empty else "0")
+            with c1: st.metric("Документов", f"{len(headers_df)}")
+            with c2: st.metric("Позиций товаров", f"{len(items_df):,}" if not items_df.empty else "0")
             with c3:
                 types = headers_df["Тип"].nunique() if "Тип" in headers_df.columns else 0
-                st.metric("📋 Типов документов", f"{types}")
+                st.metric("Типов документов", f"{types}")
             st.divider()
 
             # Список документов
-            st.markdown("### 📄 Документы")
+            st.markdown("### Документы")
             st.dataframe(headers_df, use_container_width=True, hide_index=True)
 
             # Позиции товаров
             if not items_df.empty:
                 st.divider()
-                st.markdown("### 📦 Товары в документах")
+                st.markdown("### Товары в документах")
 
                 # Топ товаров по частоте
                 name_col = next((c for c in items_df.columns if "товар" in c.lower() or c == "210\\3"), None)
@@ -5334,22 +5946,24 @@ if page == "📄 Накладные":
                     by_product = items_df[name_col].value_counts().head(20).reset_index()
                     by_product.columns = ["Товар", "Кол-во документов"]
                     fig = px.bar(by_product, x="Кол-во документов", y="Товар", orientation="h",
-                        title="📊 Топ-20 товаров по частоте в документах",
+                        title="Топ-20 товаров по частоте в документах",
                         color="Кол-во документов", color_continuous_scale="Viridis",
                         text="Кол-во документов", labels=RU)
                     fig.update_traces(textposition="auto")
                     fig.update_layout(height=max(400, min(20, len(by_product))*28),
                         yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                 st.divider()
                 st.dataframe(items_df, use_container_width=True, hide_index=True, height=500)
-                st.download_button("📥 CSV позиций", items_df.to_csv(index=False).encode("utf-8"),
+                st.download_button("CSV позиций", items_df.to_csv(index=False).encode("utf-8"),
                     "doc_items.csv", "text/csv", use_container_width=True)
             else:
                 st.info("Позиции товаров пусты — возможно документы без детализации")
         else:
-            st.warning("⚠️ Нет документов в SQL-базе. Инженер ещё заливает данные.")
+            st.warning("Нет документов в SQL-базе. Инженер ещё заливает данные.")
             st.markdown("""
             **Как это работает:**
             1. SQL-база `RK7_STAT_SH4_SHIFTS_FOODCOST` → таблица `INVOICES` → список RID документов
@@ -5362,7 +5976,7 @@ if page == "📄 Накладные":
     with sub_corr:
         corr = sh_stat_corr()
         if not corr.empty:
-            type_map = {1: "👤 Физлицо", 2: "📤 Реализация", 3: "🏢 Поставщик"}
+            type_map = {1: "Физлицо", 2: "📤 Реализация", 3: "Поставщик"}
             corr_clean = corr.copy()
             corr_clean["Тип"] = corr_clean["TYPECORR"].map(type_map).fillna("Другое")
             st.success(f"✅ {len(corr_clean)} контрагентов")
@@ -5374,11 +5988,13 @@ if page == "📄 Накладные":
                 fig = px.pie(by_type, values="Кол-во", names="Тип",
                     title="По типам контрагентов", hole=0.4, labels=RU)
                 fig.update_layout(height=350, **CHART_THEME)
-                st.plotly_chart(fig, use_container_width=True)
+                fix_bar_hover(fig)
+
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
             with c2:
                 suppliers = corr_clean[corr_clean["TYPECORR"] == 3]
-                st.metric("🏢 Поставщиков", f"{len(suppliers)}")
-                st.metric("👤 Физлиц", f"{len(corr_clean[corr_clean['TYPECORR']==1])}")
+                st.metric("Поставщиков", f"{len(suppliers)}")
+                st.metric("Физлиц", f"{len(corr_clean[corr_clean['TYPECORR']==1])}")
                 st.metric("📤 Реализация", f"{len(corr_clean[corr_clean['TYPECORR']==2])}")
 
             st.divider()
@@ -5402,14 +6018,14 @@ if page == "📄 Накладные":
             groups = sh_stat_goodgroups()
             if not groups.empty:
                 st.divider()
-                st.markdown(f"### 🗂️ Группы товаров ({len(groups)})")
+                st.markdown(f"### Группы товаров ({len(groups)})")
                 groups_clean = groups[["RID","PARENTRID","NAME"]].rename(
                     columns={"RID":"ID","PARENTRID":"Родитель","NAME":"Название"})
                 st.dataframe(groups_clean, use_container_width=True, hide_index=True, height=300)
 
 # --- ФУДКОСТ ---
-if page == "🍳 Фудкост":
-    page_header("Фудкост", "🍳")
+if page == "Фудкост":
+    page_header("Фудкост")
     st.caption(f"Источник: STAT_SH4_SHIFTS_SELLING (экспорт StoreHouse → SQL)")
 
     # Загрузка данных с названиями
@@ -5432,7 +6048,7 @@ if page == "🍳 Фудкост":
         selling["DISH_NAME"] = selling["DISH_NAME"].fillna("Товар #" + selling["GOODRID"].astype(str))
 
     if selling.empty:
-        st.warning("⚠️ Нет данных в STAT_SH4_SHIFTS_SELLING за выбранный период. Экспорт SH → SQL ещё не выполнен или период не покрыт.")
+        st.warning("Нет данных в STAT_SH4_SHIFTS_SELLING за выбранный период. Экспорт SH → SQL ещё не выполнен или период не покрыт.")
         st.info("Данные загружаются из StoreHouse за последние 30 дней. Проверьте что экспорт настроен.")
     else:
         total_purchase = float(selling["PURCHASE"].sum())
@@ -5445,13 +6061,13 @@ if page == "🍳 Фудкост":
         # === СВОДНЫЕ МЕТРИКИ ===
         c1, c2, c3, c4 = st.columns(4)
         with c1: st.metric("💵 Продажи", f"{total_selling:,.0f} ₽")
-        with c2: st.metric("📦 Себестоимость", f"{total_purchase:,.0f} ₽")
+        with c2: st.metric("Себестоимость", f"{total_purchase:,.0f} ₽")
         with c3:
-            st.metric("💰 Маржа", f"{total_margin:,.0f} ₽",
+            st.metric("Маржа", f"{total_margin:,.0f} ₽",
                 delta=f"{total_margin/max(1,total_selling)*100:.1f}% от продаж")
         with c4:
             fc_color = "normal" if 25 <= avg_foodcost <= 35 else "inverse"
-            st.metric("🍳 Фудкост", f"{avg_foodcost:.1f}%",
+            st.metric("Фудкост", f"{avg_foodcost:.1f}%",
                 delta="норма" if 25 <= avg_foodcost <= 35 else ("выше нормы" if avg_foodcost > 35 else "ниже нормы"),
                 delta_color=fc_color)
 
@@ -5459,7 +6075,7 @@ if page == "🍳 Фудкост":
 
         # === ТАБЫ ===
         tab_daily, tab_groups, tab_detail, tab_table = st.tabs([
-            "📅 По дням", "🏢 По столовым", "🏷️ По товарам", "📋 Таблица"])
+            "По дням", "По столовым", "По товарам", "Таблица"])
 
         # ---- ПО ДНЯМ ----
         with tab_daily:
@@ -5479,11 +6095,13 @@ if page == "🍳 Фудкост":
                 name="Фудкост %", yaxis="y2", mode="lines+markers",
                 line=dict(color="#ffea00", width=3)))
             fig.update_layout(barmode="group",
-                title="📅 Продажи vs Себестоимость по дням",
+                title="Продажи vs Себестоимость по дням",
                 yaxis=dict(title="₽"),
                 yaxis2=dict(title="Фудкост %", side="right", overlaying="y", range=[0, 50]),
                 height=400, legend=dict(orientation="h", y=1.1), **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
             disp_day = by_day.copy()
             disp_day.columns = ["Дата", "Себестоимость", "Продажи", "Товаров", "Кол-во", "Фудкост %", "Маржа"]
@@ -5509,13 +6127,15 @@ if page == "🍳 Фудкост":
             by_group["LOCATION"] = by_group["GROUPRID"].apply(_resolve_group)
 
             fig2 = px.bar(by_group.head(20), x="SELLING", y="LOCATION", orientation="h",
-                title="🏢 Продажи по точкам", color="FC_PCT", color_continuous_scale="RdYlGn_r",
+                title="Продажи по точкам", color="FC_PCT", color_continuous_scale="RdYlGn_r",
                 text=by_group.head(20)["SELLING"].apply(lambda x: f"{x:,.0f}₽"),
                 labels={"SELLING": "Продажи ₽", "LOCATION": "Точка", "FC_PCT": "Фудкост %"})
             fig2.update_traces(textposition="auto")
             fig2.update_layout(height=max(400, len(by_group.head(20))*30),
                 yaxis=dict(autorange="reversed"), **CHART_THEME)
-            st.plotly_chart(fig2, use_container_width=True)
+            fix_bar_hover(fig2)
+
+            st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 
             disp_gr = by_group[["LOCATION","SELLING","PURCHASE","FC_PCT","GOODS","QTY"]].copy()
             disp_gr.columns = ["Точка","Продажи ₽","Себестоимость ₽","Фудкост %","Товаров","Кол-во"]
@@ -5537,14 +6157,16 @@ if page == "🍳 Фудкост":
                 x=top["SELLING"], name="Продажи", orientation="h", marker_color="#00ff6a"))
             fig3.add_trace(go.Bar(y=top["DISH_NAME"],
                 x=top["PURCHASE"], name="Себестоимость", orientation="h", marker_color="#ff6b9d"))
-            fig3.update_layout(barmode="group", title="🏷️ Топ-20 блюд: продажи vs себестоимость",
+            fig3.update_layout(barmode="group", title="Топ-20 блюд: продажи vs себестоимость",
                 height=max(400, len(top)*28), yaxis=dict(autorange="reversed"), **CHART_THEME)
-            st.plotly_chart(fig3, use_container_width=True)
+            fix_bar_hover(fig3)
+
+            st.plotly_chart(fig3, use_container_width=True, config={"displayModeBar":False})
 
             # Проблемные товары (фудкост > 40%)
             high_fc = by_good[(by_good["FC_PCT"] > 40) & (by_good["SELLING"] > 1000)].sort_values("FC_PCT", ascending=False)
             if not high_fc.empty:
-                st.warning(f"⚠️ {len(high_fc)} товаров с фудкостом > 40%")
+                st.warning(f"{len(high_fc)} товаров с фудкостом > 40%")
                 st.dataframe(high_fc.head(20).rename(columns={
                     "DISH_NAME":"Блюдо","GOODRID":"ID SH","PURCHASE":"Себестоим.",
                     "SELLING":"Продажи","QTY":"Кол-во","FC_PCT":"Фудкост %","MARGIN":"Маржа"}),
@@ -5560,12 +6182,12 @@ if page == "🍳 Фудкост":
         with tab_table:
             st.markdown(f"**{len(selling):,}** строк за {date_from} — {date_to}")
             st.dataframe(selling, use_container_width=True, hide_index=True, height=500)
-            st.download_button("📥 CSV фудкост", selling.to_csv(index=False).encode("utf-8"),
+            st.download_button("CSV фудкост", selling.to_csv(index=False).encode("utf-8"),
                 "foodcost_selling.csv", "text/csv", use_container_width=True)
 
 # --- ФУДКОСТ (РАСЧЁТ) ---
-if page == "🔀 Фудкост (расчёт)":
-    page_header("Фудкост: себестоимость из рецептур", "🔀")
+if page == "Фудкост (расчёт)":
+    page_header("Фудкост (расчёт)")
     st.markdown("""
     **Реальный фудкост** = себестоимость порции (из Актов нарезки SH, по рецептуре) ÷ цена продажи (RK) × 100%  
     Норма для столовых: **25–35%**. Пайплайн: `GoodsTree` → комплекты → `FindLinksToCmp` → `GDoc12` → себестоимость.
@@ -5575,9 +6197,9 @@ if page == "🔀 Фудкост (расчёт)":
     d1_str, d2_str = str(date_from), str(date_to)
 
     # ---- Загрузка базовых данных ----
-    with st.spinner("📦 Загружаю товары из StoreHouse..."):
+    with st.spinner("Загружаю товары из StoreHouse..."):
         sh_prices = load_sh_goods_prices()
-    with st.spinner("🍽️ Загружаю блюда из R-Keeper..."):
+    with st.spinner("Загрузка блюд..."):
         rk_prices = load_rk_dish_prices(date_from, date_to)
 
     # ---- Загрузка себестоимости из рецептур (GDoc12) ----
@@ -5592,15 +6214,15 @@ if page == "🔀 Фудкост (расчёт)":
     rc_err = st.session_state[rc_err_key]
 
     if recipe_costs.empty:
-        st.info("📋 Для расчёта фудкоста нужно загрузить себестоимость блюд из Актов нарезки (GDoc12).")
+        st.info("Для расчёта фудкоста нужно загрузить себестоимость блюд из Актов нарезки (GDoc12).")
         st.caption("SH считает себестоимость порции по рецептуре (комплекту) при каждом акте нарезки.")
 
         c1, c2 = st.columns(2)
         with c1:
             max_cmp = st.select_slider("🔗 Комплектов для поиска:", options=[30, 50, 100, 200], value=50, key="max_cmp_sl")
         with c2:
-            max_doc = st.select_slider("📄 Макс. актов нарезки:", options=[20, 50, 100, 200], value=50, key="max_doc_sl")
-        st.caption(f"⏱️ Оценка: ~{max(1, (max_cmp + max_doc) // 10)} сек")
+            max_doc = st.select_slider("Макс. актов нарезки:", options=[20, 50, 100, 200], value=50, key="max_doc_sl")
+        st.caption(f"Оценка: ~{max(1, (max_cmp + max_doc) // 10)} сек")
 
         if st.button("🚀 Загрузить себестоимость из рецептур", type="primary", use_container_width=True):
             progress_area = st.container()
@@ -5609,37 +6231,37 @@ if page == "🔀 Фудкост (расчёт)":
             st.session_state[rc_key] = result
             st.session_state[rc_err_key] = result_err
             if result_err:
-                st.error(f"❌ {result_err}")
+                st.error(f"{result_err}")
             else:
                 st.success(f"✅ Себестоимость загружена для **{len(result)}** блюд!")
             st.rerun()
     else:
         st.success(f"✅ Себестоимость из рецептур: **{len(recipe_costs)}** блюд")
-        if st.button("🔄 Перезагрузить"):
+        if st.button("Перезагрузить"):
             del st.session_state[rc_key]
             del st.session_state[rc_err_key]
             st.rerun()
 
     # ---- Метрики ----
     c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("📦 Товаров SH", f"{len(sh_prices):,}" if not sh_prices.empty else "0")
-    with c2: st.metric("🍽️ Блюд RK", f"{len(rk_prices):,}" if not rk_prices.empty else "0")
-    with c3: st.metric("🍳 Блюд с себестоимостью", f"{len(recipe_costs):,}" if not recipe_costs.empty else "0")
+    with c1: st.metric("Товаров SH", f"{len(sh_prices):,}" if not sh_prices.empty else "0")
+    with c2: st.metric("Блюд RK", f"{len(rk_prices):,}" if not rk_prices.empty else "0")
+    with c3: st.metric("Блюд с себестоимостью", f"{len(recipe_costs):,}" if not recipe_costs.empty else "0")
     with c4:
         if not recipe_costs.empty:
             avg_cost = recipe_costs["COST_PER_PORTION"].mean()
-            st.metric("💰 Ср. себестоимость", f"{avg_cost:.1f} ₽")
+            st.metric("Ср. себестоимость", f"{avg_cost:.1f} ₽")
         else:
-            st.metric("💰 Ср. себестоимость", "—")
+            st.metric("Ср. себестоимость", "—")
 
     if sh_prices.empty:
-        st.error("❌ Не удалось загрузить товары из StoreHouse")
+        st.error("Не удалось загрузить товары из StoreHouse")
     elif rk_prices.empty:
-        st.warning("⚠️ Нет блюд с продажами за выбранный период")
+        st.warning("Нет блюд с продажами за выбранный период")
     else:
         # Сопоставление: recipe_costs (себестоимость) + sh_prices + rk_prices
         rc_arg = recipe_costs if not recipe_costs.empty else None
-        with st.spinner("🔀 Сопоставляю названия и рассчитываю фудкост..."):
+        with st.spinner("Сопоставляю названия и рассчитываю фудкост..."):
             fc = match_foodcost(rk_prices, sh_prices, purchase_prices=rc_arg)
 
         if not fc.empty:
@@ -5649,21 +6271,21 @@ if page == "🔀 Фудкост (расчёт)":
             st.divider()
             c1, c2, c3, c4 = st.columns(4)
             with c1: st.metric("🔗 Сопоставлено", f"{len(fc)}")
-            with c2: st.metric("📊 Покрытие RK", f"{len(fc)/max(1,len(rk_prices))*100:.0f}%")
+            with c2: st.metric("Покрытие RK", f"{len(fc)/max(1,len(rk_prices))*100:.0f}%")
             if has_foodcost:
                 fc_with_cost = fc[fc["FOODCOST_PCT"].notna() & (fc["FOODCOST_PCT"] > 0) & (fc["FOODCOST_PCT"] < 300)]
                 avg_fc = fc_with_cost["FOODCOST_PCT"].mean() if not fc_with_cost.empty else 0
                 with c3:
                     color = "normal" if 25 <= avg_fc <= 35 else "inverse"
-                    st.metric("🍳 Ср. фудкост", f"{avg_fc:.1f}%",
+                    st.metric("Ср. фудкост", f"{avg_fc:.1f}%",
                               delta="норма" if 25 <= avg_fc <= 35 else ("выше нормы" if avg_fc > 35 else "ниже нормы"),
                               delta_color=color)
-                with c4: st.metric("🍳 Блюд с фудкостом", f"{len(fc_with_cost)}")
+                with c4: st.metric("Блюд с фудкостом", f"{len(fc_with_cost)}")
             st.divider()
 
             # ==== ТАБЫ ====
-            tab_names = ["🍳 Фудкост" if has_foodcost else "🍳 Фудкост (нет данных)",
-                         "💰 Сравнение цен", "📄 Себестоимость по рецептурам", "📋 Таблица"]
+            tab_names = ["Фудкост" if has_foodcost else "Фудкост (нет данных)",
+                         "Сравнение цен", "Себестоимость по рецептурам", "Таблица"]
             sub_fc_tab, sub_prices, sub_recipe, sub_table = st.tabs(tab_names)
 
             # ============ ТАБ: ФУДКОСТ ============
@@ -5679,18 +6301,18 @@ if page == "🔀 Фудкост (расчёт)":
                     total_margin = total_revenue - total_cost
                     avg_foodcost = (total_cost / total_revenue * 100) if total_revenue > 0 else 0
 
-                    st.markdown(f"### 📊 Сводка за период: {date_from} — {date_to}")
+                    st.markdown(f"### Сводка за период: {date_from} — {date_to}")
                     c1, c2, c3, c4 = st.columns(4)
                     with c1:
                         st.metric("💵 Выручка", f"{total_revenue:,.0f} ₽")
                     with c2:
-                        st.metric("📦 Себестоимость", f"{total_cost:,.0f} ₽")
+                        st.metric("Себестоимость", f"{total_cost:,.0f} ₽")
                     with c3:
-                        st.metric("💰 Маржа", f"{total_margin:,.0f} ₽",
+                        st.metric("Маржа", f"{total_margin:,.0f} ₽",
                                   delta=f"{total_margin/max(1,total_revenue)*100:.1f}% от выручки")
                     with c4:
                         fc_color = "normal" if 25 <= avg_foodcost <= 35 else "inverse"
-                        st.metric("🍳 Средний фудкост", f"{avg_foodcost:.1f}%",
+                        st.metric("Средний фудкост", f"{avg_foodcost:.1f}%",
                                   delta="норма" if 25 <= avg_foodcost <= 35 else ("выше нормы" if avg_foodcost > 35 else "ниже нормы"),
                                   delta_color=fc_color)
 
@@ -5726,7 +6348,7 @@ if page == "🔀 Фудкост (расчёт)":
                     st.divider()
 
                     # ---- ПОМЕСЯЧНАЯ АНАЛИТИКА ----
-                    st.markdown("### 📅 Помесячная динамика")
+                    st.markdown("### Помесячная динамика")
                     st.caption("Выберите период для анализа фудкоста по месяцам")
 
                     mc1, mc2 = st.columns(2)
@@ -5735,7 +6357,7 @@ if page == "🔀 Фудкост (расчёт)":
                     with mc2:
                         monthly_to = st.date_input("По:", date_to, key="fc_monthly_to")
 
-                    with st.spinner("📊 Загрузка помесячных продаж..."):
+                    with st.spinner("Загрузка помесячных продаж..."):
                         monthly_sales = load_rk_monthly_sales(monthly_from, monthly_to)
 
                     if not monthly_sales.empty and not recipe_costs.empty:
@@ -5776,10 +6398,12 @@ if page == "🔀 Фудкост (расчёт)":
                             fig.add_trace(go.Bar(x=by_month["MONTH"], y=by_month["MARGIN"],
                                 name="Маржа", marker_color="#10b981", text=by_month["MARGIN"].apply(lambda x: f"{x:,.0f}"),
                                 textposition="auto"))
-                            fig.update_layout(title="💰 Выручка, себестоимость и маржа по месяцам",
+                            fig.update_layout(title="Выручка, себестоимость и маржа по месяцам",
                                 barmode="group", height=420, xaxis_title="Месяц", yaxis_title="₽",
                                 legend=dict(orientation="h", y=1.1), **CHART_THEME)
-                            st.plotly_chart(fig, use_container_width=True)
+                            fix_bar_hover(fig)
+
+                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                             # График 2: Фудкост % по месяцам
                             colors_fc_monthly = by_month["FOODCOST_PCT"].apply(
@@ -5791,12 +6415,14 @@ if page == "🔀 Фудкост (расчёт)":
                                 textposition="auto", name="Фудкост %"))
                             fig2.add_hline(y=25, line_dash="dash", line_color="#10b981", annotation_text="25%")
                             fig2.add_hline(y=35, line_dash="dash", line_color="#ef4444", annotation_text="35%")
-                            fig2.update_layout(title="🍳 Фудкост % по месяцам",
+                            fig2.update_layout(title="Фудкост % по месяцам",
                                 height=350, xaxis_title="Месяц", yaxis_title="Фудкост %", **CHART_THEME)
-                            st.plotly_chart(fig2, use_container_width=True)
+                            fix_bar_hover(fig2)
+
+                            st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 
                             # Таблица по месяцам
-                            with st.expander("📋 Таблица по месяцам"):
+                            with st.expander("Таблица по месяцам"):
                                 month_disp = by_month.rename(columns={
                                     "MONTH":"Месяц","REVENUE":"Выручка ₽","COST":"Себестоимость ₽",
                                     "MARGIN":"Маржа ₽","FOODCOST_PCT":"Фудкост %","MARGIN_PCT":"Маржа %",
@@ -5812,7 +6438,7 @@ if page == "🔀 Фудкост (расчёт)":
                     st.divider()
 
                     # ---- РАСПРЕДЕЛЕНИЕ ПО ЗОНАМ (существующие графики) ----
-                    st.markdown("### 📊 Распределение по зонам")
+                    st.markdown("### Распределение по зонам")
 
                     fc_fc["FC_ZONE"] = fc_fc["FOODCOST_PCT"].apply(
                         lambda x: "🟢 Норма (25–35%)" if 25 <= x <= 35
@@ -5827,7 +6453,9 @@ if page == "🔀 Фудкост (расчёт)":
                             color="Зона", color_discrete_map={
                                 "🟢 Норма (25–35%)": "#10b981", "🔴 Высокий (>35%)": "#ef4444", "🟡 Низкий (<25%)": "#f59e0b"})
                         fig.update_layout(height=380, **CHART_THEME)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
                     with cr:
                         fig = px.histogram(fc_fc, x="FOODCOST_PCT", nbins=40,
                             title="Распределение фудкоста, %",
@@ -5835,7 +6463,9 @@ if page == "🔀 Фудкост (расчёт)":
                         fig.add_vline(x=25, line_dash="dash", line_color="#10b981", annotation_text="25%")
                         fig.add_vline(x=35, line_dash="dash", line_color="#ef4444", annotation_text="35%")
                         fig.update_layout(height=380, **CHART_THEME)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     st.divider()
                     # Топ-30 высокий фудкост
@@ -5849,40 +6479,46 @@ if page == "🔀 Фудкост (расчёт)":
                         customdata=top_fc[["COST_PRICE","SALE_PRICE","MARGIN"]].values if "MARGIN" in top_fc.columns else None,
                         hovertemplate="<b>%{y}</b><br>ФК: %{x:.1f}%<br>Себест: %{customdata[0]:.0f}₽<br>Продажа: %{customdata[1]:.0f}₽<br>Маржа: %{customdata[2]:.0f}₽<extra></extra>" if "MARGIN" in top_fc.columns else None))
                     fig.update_traces(textposition="auto")
-                    fig.update_layout(title="🔴 Топ-30: самый высокий фудкост",
+                    fig.update_layout(title="Топ-30: самый высокий фудкост",
                         height=max(500, len(top_fc)*25),
                         yaxis=dict(autorange="reversed"), xaxis_title="Фудкост %", **CHART_THEME)
                     fig.add_vline(x=35, line_dash="dash", line_color="#ef4444", annotation_text="35%")
                     fig.add_vline(x=25, line_dash="dash", line_color="#10b981")
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     # Маржинальные vs убыточные
                     if "MARGIN" in fc_fc.columns:
                         st.divider()
                         cl, cr = st.columns(2)
                         with cl:
-                            st.markdown("#### 🟢 Самые маржинальные")
+                            st.markdown("#### Самые маржинальные")
                             best = fc_fc.sort_values("MARGIN", ascending=False).head(15)
                             fig = px.bar(best, x="MARGIN", y="DISH_NAME", orientation="h",
                                 color="FOODCOST_PCT", color_continuous_scale="RdYlGn_r",
                                 title="Топ-15 по марже (₽)", labels={"MARGIN":"Маржа ₽","DISH_NAME":"Блюдо","FOODCOST_PCT":"ФК%"})
                             fig.update_layout(height=450, yaxis=dict(autorange="reversed"), coloraxis_colorbar_title="ФК%", **CHART_THEME)
-                            st.plotly_chart(fig, use_container_width=True)
+                            fix_bar_hover(fig)
+
+                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
                         with cr:
-                            st.markdown("#### 🔴 Минимальная маржа")
+                            st.markdown("#### Минимальная маржа")
                             worst = fc_fc.sort_values("MARGIN", ascending=True).head(15)
                             fig = px.bar(worst, x="MARGIN", y="DISH_NAME", orientation="h",
                                 color="FOODCOST_PCT", color_continuous_scale="RdYlGn_r",
                                 title="Топ-15 с мин. маржой (₽)", labels={"MARGIN":"Маржа ₽","DISH_NAME":"Блюдо","FOODCOST_PCT":"ФК%"})
                             fig.update_layout(height=450, yaxis=dict(autorange="reversed"), coloraxis_colorbar_title="ФК%", **CHART_THEME)
-                            st.plotly_chart(fig, use_container_width=True)
+                            fix_bar_hover(fig)
+
+                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     # Scatter
                     st.divider()
                     fig = px.scatter(fc_fc, x="COST_PRICE", y="SALE_PRICE",
                         hover_name="DISH_NAME", size="TOTAL_SUM",
                         color="FOODCOST_PCT", color_continuous_scale="RdYlGn_r",
-                        title="💡 Себестоимость vs Цена продажи (размер = выручка)",
+                        title="Себестоимость vs Цена продажи (размер = выручка)",
                         labels={"COST_PRICE": "Себестоимость ₽", "SALE_PRICE": "Цена продажи ₽", "FOODCOST_PCT":"ФК%"})
                     max_p = max(fc_fc["COST_PRICE"].max(), fc_fc["SALE_PRICE"].max()) * 1.1 if len(fc_fc) else 100
                     fig.add_trace(go.Scatter(x=[0, max_p], y=[0, max_p],
@@ -5890,7 +6526,9 @@ if page == "🔀 Фудкост (расчёт)":
                     fig.add_trace(go.Scatter(x=[0, max_p], y=[0, max_p / 0.35],
                         mode="lines", line=dict(dash="dot", color="#ef4444", width=1), name="ФК=35%"))
                     fig.update_layout(height=500, coloraxis_colorbar_title="ФК%", **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     # По группам
                     if "SH_GROUP" in fc_fc.columns:
@@ -5907,12 +6545,14 @@ if page == "🔀 Фудкост (расчёт)":
                                 orientation="h", marker_color=colors_g.tolist(),
                                 text=by_grp["AVG_FC"].apply(lambda x: f"{x:.1f}%")))
                             fig.update_traces(textposition="auto")
-                            fig.update_layout(title="📊 Средний фудкост по группам SH",
+                            fig.update_layout(title="Средний фудкост по группам SH",
                                 height=max(400, len(by_grp)*28),
                                 yaxis=dict(autorange="reversed"), xaxis_title="Фудкост %", **CHART_THEME)
                             fig.add_vline(x=35, line_dash="dash", line_color="#ef4444")
                             fig.add_vline(x=25, line_dash="dash", line_color="#10b981")
-                            st.plotly_chart(fig, use_container_width=True)
+                            fix_bar_hover(fig)
+
+                            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     # Таблица фудкоста
                     st.divider()
@@ -5929,17 +6569,17 @@ if page == "🔀 Фудкост (расчёт)":
                     if s_col in fc_disp.columns:
                         fc_disp = fc_disp.sort_values(s_col, ascending=s_asc)
                     st.dataframe(fc_disp, use_container_width=True, hide_index=True, height=500)
-                    st.download_button("📥 Фудкост CSV", fc_disp.to_csv(index=False).encode("utf-8"),
+                    st.download_button("Фудкост CSV", fc_disp.to_csv(index=False).encode("utf-8"),
                         "foodcost_recipe.csv", "text/csv", use_container_width=True)
 
                     # ---- ДЕТАЛИЗАЦИЯ: клик по блюду → показать Акт нарезки ----
                     st.divider()
-                    st.markdown("#### 🔍 Детализация: проверка себестоимости")
+                    st.markdown("#### Детализация: проверка себестоимости")
                     st.caption("Выберите блюдо чтобы увидеть Акт нарезки (GDoc12) с рецептурой и расчётом себестоимости")
 
                     # Список блюд для выбора
                     dish_options = fc_fc.sort_values("FOODCOST_PCT", ascending=False)["DISH_NAME"].tolist()
-                    selected_dish = st.selectbox("🍽️ Блюдо:", dish_options, key="drilldown_dish",
+                    selected_dish = st.selectbox("Блюдо:", dish_options, key="drilldown_dish",
                         index=0 if dish_options else None)
 
                     if selected_dish:
@@ -5960,7 +6600,7 @@ if page == "🔀 Фудкост (расчёт)":
                                 doc_rid = int(match.iloc[0]["LAST_DOC_RID"])
 
                         if doc_rid:
-                            with st.spinner(f"📄 Загружаю Акт нарезки (RID={doc_rid})..."):
+                            with st.spinner(f"Загружаю Акт нарезки (RID={doc_rid})..."):
                                 header, items, detail_err = sh_load_gdoc12_detail(doc_rid)
 
                             if detail_err:
@@ -5968,7 +6608,7 @@ if page == "🔀 Фудкост (расчёт)":
                             else:
                                 # Заголовок документа
                                 if header:
-                                    st.markdown(f"##### 📄 Акт нарезки №{header.get('Номер', '?')} от {header.get('Дата', '?')}")
+                                    st.markdown(f"##### Акт нарезки №{header.get('Номер', '?')} от {header.get('Дата', '?')}")
                                     header_cols = st.columns(len(header))
                                     for i, (k, v) in enumerate(header.items()):
                                         with header_cols[min(i, len(header_cols)-1)]:
@@ -5976,7 +6616,7 @@ if page == "🔀 Фудкост (расчёт)":
 
                                 # Все позиции документа — ВСЕ блюда из этого акта
                                 if not items.empty:
-                                    st.markdown(f"##### 📋 Все позиции акта ({len(items)} блюд)")
+                                    st.markdown(f"##### Все позиции акта ({len(items)} блюд)")
                                     st.caption("Каждая строка — блюдо, приготовленное по рецептуре (комплекту). Себестоимость рассчитана SH по закупочным ценам ингредиентов.")
 
                                     # Подсветим выбранное блюдо
@@ -6003,7 +6643,7 @@ if page == "🔀 Фудкост (расчёт)":
                                 else:
                                     st.warning("Позиции документа пусты")
                         else:
-                            st.caption("⚠️ Не найден RID документа для этого блюда. Попробуйте перезагрузить данные.")
+                            st.caption("Не найден RID документа для этого блюда. Попробуйте перезагрузить данные.")
                 else:
                     st.info("⏳ Нажмите кнопку выше чтобы загрузить себестоимость из рецептур.")
                     if rc_err:
@@ -6026,7 +6666,9 @@ if page == "🔀 Фудкост (расчёт)":
                             height=max(500, min(30, len(top_diff))*25),
                             yaxis=dict(autorange="reversed"), xaxis_title="₽", **CHART_THEME)
                         fig.add_vline(x=0, line_color="white", line_width=1)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
                     with cr:
                         fig = px.scatter(fc_valid, x="SH_SALE_PRICE", y="SALE_PRICE",
                             hover_name="DISH_NAME", size="TOTAL_SUM",
@@ -6036,7 +6678,9 @@ if page == "🔀 Фудкост (расчёт)":
                         fig.add_trace(go.Scatter(x=[0, max_p], y=[0, max_p],
                             mode="lines", line=dict(dash="dash", color="white", width=1), name="Равны"))
                         fig.update_layout(height=450, coloraxis_colorbar_title="Разн.%", **CHART_THEME)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fix_bar_hover(fig)
+
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
                 else:
                     st.info("Нет данных для сравнения цен")
 
@@ -6045,9 +6689,9 @@ if page == "🔀 Фудкост (расчёт)":
                 if not recipe_costs.empty:
                     st.success(f"✅ {len(recipe_costs)} блюд с себестоимостью из Актов нарезки (GDoc12)")
                     c1, c2, c3 = st.columns(3)
-                    with c1: st.metric("📦 Блюд", f"{len(recipe_costs):,}")
-                    with c2: st.metric("💰 Ср. себестоимость", f"{recipe_costs['COST_PER_PORTION'].mean():.1f} ₽")
-                    with c3: st.metric("📄 Актов нарезки", f"{recipe_costs['DOC_COUNT'].sum():,.0f}")
+                    with c1: st.metric("Блюд", f"{len(recipe_costs):,}")
+                    with c2: st.metric("Ср. себестоимость", f"{recipe_costs['COST_PER_PORTION'].mean():.1f} ₽")
+                    with c3: st.metric("Актов нарезки", f"{recipe_costs['DOC_COUNT'].sum():,.0f}")
 
                     top = recipe_costs.head(30)
                     fig = px.bar(top, x="COST_PER_PORTION", y="DISH_NAME", orientation="h",
@@ -6058,12 +6702,14 @@ if page == "🔀 Фудкост (расчёт)":
                     fig.update_traces(texttemplate="%{text:.1f} ₽", textposition="auto")
                     fig.update_layout(height=max(500, len(top)*25),
                         yaxis=dict(autorange="reversed"), coloraxis_colorbar_title="₽", **CHART_THEME)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fix_bar_hover(fig)
+
+                    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
                     rc_disp = recipe_costs.rename(columns={"DISH_NAME":"Блюдо","COST_PER_PORTION":"Себест. ₽/порц",
                         "TOTAL_PORTIONS":"Порций","TOTAL_COST":"Общая себест. ₽","DOC_COUNT":"Актов","UNIT":"Ед."})
                     st.dataframe(rc_disp, use_container_width=True, hide_index=True, height=500)
-                    st.download_button("📥 Себестоимость CSV", rc_disp.to_csv(index=False).encode("utf-8"),
+                    st.download_button("Себестоимость CSV", rc_disp.to_csv(index=False).encode("utf-8"),
                         "recipe_costs.csv", "text/csv", use_container_width=True)
                 else:
                     st.info("Себестоимость не загружена")
@@ -6088,20 +6734,20 @@ if page == "🔀 Фудкост (расчёт)":
                 if s_col in disp.columns:
                     disp = disp.sort_values(s_col, ascending=s_asc)
                 st.dataframe(disp, use_container_width=True, hide_index=True, height=600)
-                st.download_button("📥 CSV", disp.to_csv(index=False).encode("utf-8"),
+                st.download_button("CSV", disp.to_csv(index=False).encode("utf-8"),
                     "foodcost_full.csv", "text/csv", use_container_width=True)
 
                 unmatched = rk_prices[~rk_prices["DISH_NAME"].str.strip().str.lower().isin(
                     fc["DISH_NAME"].str.strip().str.lower())]
                 if not unmatched.empty:
-                    with st.expander(f"⚠️ Не сопоставлено: {len(unmatched)} блюд из RK"):
+                    with st.expander(f"Не сопоставлено: {len(unmatched)} блюд из RK"):
                         st.dataframe(unmatched.sort_values("TOTAL_SUM", ascending=False).head(30)[
                             ["DISH_NAME","SALE_PRICE","TOTAL_QTY","TOTAL_SUM"]].rename(
                             columns={"DISH_NAME":"Блюдо","SALE_PRICE":"Цена","TOTAL_QTY":"Кол-во","TOTAL_SUM":"Выручка"}),
                             use_container_width=True, hide_index=True)
         else:
             st.warning("Не удалось сопоставить блюда по названию.")
-            with st.expander("🔍 Примеры названий"):
+            with st.expander("Примеры названий"):
                 cl, cr = st.columns(2)
                 with cl:
                     st.markdown("**R-Keeper:**")
@@ -6111,15 +6757,15 @@ if page == "🔀 Фудкост (расчёт)":
                     for n in sh_prices["SH_NAME"].head(20): st.text(n)
 
 # --- СКЛАД: API ---
-if page == "🔍 Склад: Схема":
-    page_header("StoreHouse API Explorer", "🔍")
+if page == "Склад: Схема":
+    page_header("StoreHouse API")
     st.caption(f"REST API: {SH_API['url']} · Пользователь: {SH_API['user']}")
 
     # Информация о сервере
     with st.expander("🖥️ Информация о сервере", expanded=True):
         info, info_err = sh_info()
         if info_err:
-            st.error(f"❌ Сервер недоступен: {info_err}")
+            st.error(f"Сервер недоступен: {info_err}")
         else:
             cols = st.columns(3)
             with cols[0]: st.metric("Версия API", info.get("Version", "?"))
@@ -6135,7 +6781,7 @@ if page == "🔍 Склад: Схема":
     st.divider()
 
     # Проверка прав
-    st.markdown("### 🔐 Права на процедуры")
+    st.markdown("### Права на процедуры")
     all_procs = [
         "Divisions", "Goods", "GoodsCategories", "GoodsTree", "Departs",
         "Remains", "Selling", "FoodCost", "Invoices",
@@ -6157,7 +6803,7 @@ if page == "🔍 Склад: Схема":
     st.divider()
 
     # Структура процедур
-    st.markdown("### 📋 Структура процедуры")
+    st.markdown("### Структура процедуры")
     proc_to_explore = st.selectbox("Процедура:", all_procs)
     if st.button("📖 Показать структуру", key="sh_struct"):
         struct_data, struct_err = sh_struct(proc_to_explore)
@@ -6168,7 +6814,7 @@ if page == "🔍 Склад: Схема":
             if tables:
                 for i, tbl in enumerate(tables):
                     head = tbl.get("head", f"Table_{i}")
-                    single = "📌 Однострочный" if tbl.get("SingleRow") else "📋 Многострочный"
+                    single = "📌 Однострочный" if tbl.get("SingleRow") else "Многострочный"
                     st.markdown(f"**Датасет `{head}`** ({single})")
                     fields = tbl.get("fields", [])
                     if fields:
@@ -6182,7 +6828,7 @@ if page == "🔍 Склад: Схема":
     # Выполнение процедуры
     st.markdown("### ▶️ Выполнить процедуру")
     exec_proc = st.selectbox("Процедура для выполнения:", all_procs, key="exec_proc")
-    exec_mode = st.radio("Режим:", ["🧠 Умный (auto-параметры)", "📦 Простой (без параметров)"], horizontal=True)
+    exec_mode = st.radio("Режим:", ["🧠 Умный (auto-параметры)", "Простой (без параметров)"], horizontal=True)
     if st.button("▶️ Выполнить", key="sh_exec_btn"):
         with st.spinner(f"Выполняю {exec_proc}..."):
             if exec_mode.startswith("🧠"):
@@ -6192,7 +6838,7 @@ if page == "🔍 Склад: Схема":
                 elif not df.empty:
                     st.success(f"✅ {len(df)} строк, {len(df.columns)} столбцов")
                     st.dataframe(df, use_container_width=True, hide_index=True, height=400)
-                    st.download_button(f"📥 CSV", df.to_csv(index=False).encode("utf-8"),
+                    st.download_button(f"CSV", df.to_csv(index=False).encode("utf-8"),
                         f"sh_{exec_proc}.csv", "text/csv", use_container_width=True)
                 else:
                     st.info("Пустой результат")
@@ -6205,7 +6851,7 @@ if page == "🔍 Склад: Схема":
                 if not df.empty:
                     st.markdown(f"**Таблица {i+1}** ({len(df)} строк, {len(df.columns)} столбцов)")
                     st.dataframe(df, use_container_width=True, hide_index=True, height=400)
-                    st.download_button(f"📥 CSV таблицы {i+1}", df.to_csv(index=False).encode("utf-8"),
+                    st.download_button(f"CSV таблицы {i+1}", df.to_csv(index=False).encode("utf-8"),
                         f"sh_{exec_proc}_{i}.csv", "text/csv", key=f"dl_{exec_proc}_{i}",
                         use_container_width=True)
             if not all_tables:
@@ -6220,7 +6866,7 @@ if page == "🔍 Склад: Схема":
         filled = counts[counts["Записей"] > 0]
         empty = counts[counts["Записей"] == 0]
         c1, c2, c3 = st.columns(3)
-        with c1: st.metric("📋 Всего таблиц", f"{len(counts)}")
+        with c1: st.metric("Всего таблиц", f"{len(counts)}")
         with c2: st.metric("✅ С данными", f"{len(filled)}")
         with c3: st.metric("⬚ Пустых", f"{len(empty)}")
         st.dataframe(counts, use_container_width=True, hide_index=True)
@@ -6228,14 +6874,16 @@ if page == "🔍 Склад: Схема":
         # Показываем наполненные таблицы
         if not filled.empty:
             fig = px.bar(filled, x="Записей", y="Таблица", orientation="h",
-                title="📊 Наполнение SQL-базы статистики",
+                title="Наполнение SQL-базы статистики",
                 color="Записей", color_continuous_scale="Viridis", text="Записей", labels=RU)
             fig.update_traces(textposition="auto")
             fig.update_layout(height=max(300, len(filled)*40),
                 yaxis=dict(autorange="reversed"), coloraxis_showscale=False, **CHART_THEME)
-            st.plotly_chart(fig, use_container_width=True)
+            fix_bar_hover(fig)
+
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
     else:
         st.warning("Не удалось подключиться к SQL-базе статистики")
 
 st.divider()
-st.caption(f"🔄 {date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | Gemini AI | {len(load_restaurants())} точек | 📦 SH API: {SH_API['url']}")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v5.9")

@@ -253,7 +253,7 @@ def show_login_page():
                         st.error("Неверный логин или пароль")
 
         st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
-            v9.19
+            v9.21
         </div>""", unsafe_allow_html=True)
 
 
@@ -3874,7 +3874,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v9.19")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.21")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -8103,8 +8103,25 @@ if page == "Фудкост (расчёт)":
 
                     st.markdown(f"### Сводка за период: {date_from} — {date_to}")
 
-                    # --- РЯД 1: Товары С рецептурами ---
-                    st.caption("📋 Товары с рецептурами (акты нарезки)")
+                    # --- РЯД 1: ИТОГО (главное) ---
+                    r0c1, r0c2, r0c3, r0c4 = st.columns(4)
+                    with r0c1: st.metric("Выручка", f"{total_all_revenue:,.0f} ₽")
+                    with r0c2: st.metric("Себестоимость", f"{total_all_cost:,.0f} ₽")
+                    with r0c3: st.metric("Маржа", f"{total_all_margin:,.0f} ₽",
+                                  delta=f"{total_all_margin/max(1,total_all_revenue)*100:.1f}% от выручки")
+                    with r0c4:
+                        _all_fc_color = "normal" if 25 <= total_all_fc <= 35 else "inverse"
+                        st.metric("Фудкост", f"{total_all_fc:.1f}%",
+                                  delta="норма" if 25 <= total_all_fc <= 35 else ("выше" if total_all_fc > 35 else "ниже"),
+                                  delta_color=_all_fc_color)
+                    _coverage_pct = (total_revenue+no_recipe_revenue)/max(1,full_revenue)*100
+                    if _coverage_pct < 100:
+                        st.caption(f"Покрыто себестоимостью: {_coverage_pct:.0f}% выручки. Не сопоставлено: {uncovered_revenue:,.0f} ₽")
+                    st.divider()
+
+                    # --- Детализация ---
+                    # Товары С рецептурами (переработка)
+                    st.caption("📋 Товары с рецептурами (переработка, акты нарезки)")
                     r1c1, r1c2, r1c3, r1c4 = st.columns(4)
                     with r1c1: st.metric("Выручка", f"{total_revenue:,.0f} ₽")
                     with r1c2: st.metric("Себестоимость", f"{total_cost:,.0f} ₽")
@@ -8116,33 +8133,43 @@ if page == "Фудкост (расчёт)":
                                   delta="норма" if 25 <= avg_foodcost <= 35 else ("выше" if avg_foodcost > 35 else "ниже"),
                                   delta_color=fc_color)
 
-                    # --- РЯД 2: Товары БЕЗ рецептур (цена из SH) ---
-                    if no_recipe_revenue > 0 or uncovered_revenue > 0:
+                    # Товары БЕЗ переработки (купили → продали)
+                    if no_recipe_revenue > 0:
                         st.divider()
-                        st.caption("📦 Товары без рецептур (по закупочной цене SH)")
+                        st.caption("📦 Товары без переработки (купили → продали, себестоимость = закупочная цена)")
                         no_recipe_margin = no_recipe_revenue - no_recipe_cost
                         no_recipe_fc = (no_recipe_cost / no_recipe_revenue * 100) if no_recipe_revenue > 0 else 0
                         r2c1, r2c2, r2c3, r2c4 = st.columns(4)
                         with r2c1: st.metric("Выручка", f"{no_recipe_revenue:,.0f} ₽")
                         with r2c2: st.metric("Себестоимость", f"{no_recipe_cost:,.0f} ₽",
-                                      delta="из цен SH" if no_recipe_cost > 0 else "нет данных")
+                                      delta="из накладных SH" if no_recipe_cost > 0 else "нет данных")
                         with r2c3: st.metric("Маржа", f"{no_recipe_margin:,.0f} ₽")
                         with r2c4: st.metric("Фудкост", f"{no_recipe_fc:.1f}%" if no_recipe_cost > 0 else "—")
-
-                    # --- РЯД 3: ИТОГО ---
-                    st.divider()
-                    st.markdown("##### Итого по всем товарам")
-                    r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-                    with r3c1: st.metric("Общая выручка", f"{total_all_revenue:,.0f} ₽")
-                    with r3c2: st.metric("Общая себестоимость", f"{total_all_cost:,.0f} ₽")
-                    with r3c3: st.metric("Общая маржа", f"{total_all_margin:,.0f} ₽",
-                                  delta=f"{total_all_margin/max(1,total_all_revenue)*100:.1f}%")
-                    with r3c4:
-                        st.metric("Общий фудкост", f"{total_all_fc:.1f}%",
-                                  delta=f"покрыто {(total_revenue+no_recipe_revenue)/max(1,full_revenue)*100:.0f}% выручки")
-
-                    if uncovered_revenue > 0:
-                        st.caption(f"Не сопоставлено: {uncovered_revenue:,.0f} ₽ ({uncovered_revenue/max(1,full_revenue)*100:.1f}% выручки) — нет в SH")
+                        # Товары без закупочной цены — предложить загрузить ещё накладных
+                        if not fc_no_recipe.empty and "DISH_NAME" in fc_no_recipe.columns:
+                            _zero_items = fc_no_recipe[fc_no_recipe["_COST"] <= 0].copy()
+                            if not _zero_items.empty:
+                                _zero_rev = float(_zero_items["TOTAL_SUM"].sum())
+                                with st.expander(f"⚠️ {len(_zero_items)} товаров без закупочной цены ({_zero_rev:,.0f} ₽ выручки)"):
+                                    _show = _zero_items[["DISH_NAME", "TOTAL_QTY", "TOTAL_SUM"]].copy()
+                                    _show.columns = ["Товар", "Кол-во", "Выручка ₽"]
+                                    _show = _show.sort_values("Выручка ₽", ascending=False).reset_index(drop=True)
+                                    st.dataframe(_show, use_container_width=True, hide_index=True)
+                                    st.caption("Этих товаров нет в загруженных накладных. Попробуйте загрузить больше.")
+                                    if st.button("🔍 Загрузить ещё накладных (200 шт.)", key="fc_load_more_invoices"):
+                                        with st.spinner("Ищу закупочные цены в накладных SH..."):
+                                            _pp_d1 = (datetime.now().date() - timedelta(60)).isoformat()
+                                            _pp_d2 = datetime.now().date().isoformat()
+                                            try:
+                                                _pp_data, _pp_err = sh_load_purchase_prices(_pp_d1, _pp_d2, max_rids=200)
+                                                if not _pp_err and not _pp_data.empty:
+                                                    st.session_state["sh_purchases_30d"] = _pp_data
+                                                    st.success(f"Загружено {len(_pp_data)} товаров из накладных за 60 дней")
+                                                    st.rerun()
+                                                elif _pp_err:
+                                                    st.warning(f"Ошибка: {_pp_err}")
+                                            except Exception as _e:
+                                                st.warning(f"Не удалось: {_e}")
 
                     # Покрытие выручки рецептурами
                     if full_revenue > 0:
@@ -9025,4 +9052,4 @@ if page == "Личный кабинет":
             st.info("Нет сохранённых настроек")
 
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.19")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.21")

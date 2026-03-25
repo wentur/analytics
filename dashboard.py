@@ -5,6 +5,22 @@
 
 # === Auto-setup: config.toml рядом с dashboard.py → .streamlit/config.toml ===
 import os, shutil, pathlib
+
+# Load .env file if exists
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(_script_dir, ".env"))
+except ImportError:
+    # Manual .env loading if python-dotenv not installed
+    _env_path = os.path.join(_script_dir, ".env")
+    if os.path.exists(_env_path):
+        with open(_env_path) as _ef:
+            for _line in _ef:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    os.environ.setdefault(_k.strip(), _v.strip())
 _script_dir = pathlib.Path(__file__).parent
 _config_src = _script_dir / "config.toml"
 _config_dst = _script_dir / ".streamlit" / "config.toml"
@@ -24,22 +40,27 @@ import re
 import time
 import hashlib
 import pickle
+import sqlite3
+import json as _json
 
 # ============================================================
 # НАСТРОЙКИ
 # ============================================================
 DB_CONFIG = {
-    "server": "saturn.carbis.ru", "port": "7473",
-    "user": "readonly", "password": "ai3nPG7rwtrJRw",
-    "database": "RK7", "login_timeout": 15, "timeout": 60,
+    "server": os.environ.get("RK7_HOST", "saturn.carbis.ru"),
+    "port": os.environ.get("RK7_PORT", "7473"),
+    "user": os.environ.get("RK7_USER", "readonly"),
+    "password": os.environ.get("RK7_PASSWORD", ""),
+    "database": os.environ.get("RK7_DB", "RK7"),
+    "login_timeout": 15, "timeout": 60,
 }
 SH_API = {
-    "url": "http://saturn.carbis.ru:7477/api",
-    "user": "readonly",
-    "password": "60iNr1uy",
+    "url": os.environ.get("SH_API_URL", "http://saturn.carbis.ru:7477/api"),
+    "user": os.environ.get("SH_API_USER", "readonly"),
+    "password": os.environ.get("SH_API_PASSWORD", ""),
 }
 
-GEMINI_API_KEY = "AIzaSyAsQX1_48p-h_jR5DJrZ-jiylkalila2Lg"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
@@ -102,6 +123,63 @@ def check_auth() -> dict | None:
         return user
 
     return None
+
+# ============================================================
+# НАСТРОЙКИ ПОЛЬЗОВАТЕЛЕЙ (SQLite)
+# ============================================================
+_SETTINGS_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "goai_settings.db")
+
+def _init_settings_db():
+    """Создать таблицу настроек если не существует."""
+    conn = sqlite3.connect(_SETTINGS_DB)
+    conn.execute("""CREATE TABLE IF NOT EXISTS user_settings (
+        username TEXT NOT NULL, key TEXT NOT NULL, value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (username, key))""")
+    conn.commit()
+    conn.close()
+
+def save_user_setting(username, key, value):
+    """Сохранить настройку пользователя."""
+    try:
+        _init_settings_db()
+        conn = sqlite3.connect(_SETTINGS_DB)
+        conn.execute("""INSERT OR REPLACE INTO user_settings (username, key, value, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)""", (username, key, _json.dumps(value, ensure_ascii=False)))
+        conn.commit()
+        conn.close()
+    except: pass
+
+def load_user_setting(username, key, default=None):
+    """Загрузить настройку пользователя."""
+    try:
+        _init_settings_db()
+        conn = sqlite3.connect(_SETTINGS_DB)
+        row = conn.execute("SELECT value FROM user_settings WHERE username=? AND key=?", (username, key)).fetchone()
+        conn.close()
+        if row: return _json.loads(row[0])
+    except: pass
+    return default
+
+def load_all_user_settings(username):
+    """Загрузить все настройки пользователя."""
+    try:
+        _init_settings_db()
+        conn = sqlite3.connect(_SETTINGS_DB)
+        rows = conn.execute("SELECT key, value, updated_at FROM user_settings WHERE username=? ORDER BY key", (username,)).fetchall()
+        conn.close()
+        return {r[0]: _json.loads(r[1]) for r in rows}
+    except: pass
+    return {}
+
+def delete_user_setting(username, key):
+    """Удалить настройку пользователя."""
+    try:
+        conn = sqlite3.connect(_SETTINGS_DB)
+        conn.execute("DELETE FROM user_settings WHERE username=? AND key=?", (username, key))
+        conn.commit()
+        conn.close()
+    except: pass
 
 def show_login_page():
     """Показать форму входа. Вызывается если check_auth() == None."""
@@ -173,6 +251,10 @@ def show_login_page():
                     else:
                         st.error("Неверный логин или пароль")
 
+        st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
+            v9.8
+        </div>""", unsafe_allow_html=True)
+
 
 # ============================================================
 # БД
@@ -218,6 +300,15 @@ def run_query(query, params=None):
     except Exception as e:
         st.error(f"Ошибка запроса: {e}")
         return pd.DataFrame()
+
+def run_query_cached(query, params=None):
+    """run_query with session_state caching — no DB hit on page switch."""
+    import hashlib
+    _h = hashlib.md5(f"{query}|{params}".encode()).hexdigest()[:12]
+    _key = f"_qc_{_h}"
+    if _key not in st.session_state:
+        st.session_state[_key] = run_query(query, params)
+    return st.session_state[_key]
 
 def run_query_safe(query):
     q = query.strip().rstrip(";").strip()
@@ -748,6 +839,14 @@ strong { color: #fff; font-weight: 600; }
 /* === EXPANDER === */
 div[data-testid="stExpander"] { background:var(--card); border:1px solid var(--border); border-radius:12px; }
 div[data-testid="stExpander"]:hover { border-color:rgba(0,255,106,.1); }
+/* Sidebar expanders (menu groups) — NO card background */
+section[data-testid="stSidebar"] div[data-testid="stExpander"] {
+    background: transparent !important; border: none !important;
+    border-radius: 0 !important; box-shadow: none !important;
+}
+section[data-testid="stSidebar"] div[data-testid="stExpander"]:hover {
+    border-color: transparent !important;
+}
 
 /* === INPUTS === */
 .stSelectbox > div > div, .stMultiSelect > div > div { background:var(--card) !important; border-color:var(--border) !important; border-radius:10px !important; }
@@ -855,6 +954,20 @@ div[data-testid="stMarkdownContainer"] + div[style*="position: fixed"] {
    ================================================================ */
 
 @media (max-width: 768px) {
+
+    /* --- Clean transition when switching pages on mobile --- */
+    .main .block-container {
+        transition: opacity 0.2s ease-out !important;
+    }
+    /* Sidebar overlay - ensure it covers content fully */
+    section[data-testid="stSidebar"] {
+        transition: margin-left 0.2s ease !important;
+        z-index: 999 !important;
+    }
+    /* When sidebar closes, main content fades in fresh */
+    section[data-testid="stSidebar"][aria-expanded="false"] ~ .main .block-container {
+        opacity: 1 !important;
+    }
 
     /* --- Make header visible but only show the sidebar expand button --- */
     header[data-testid="stHeader"] {
@@ -1041,6 +1154,13 @@ if IS_LIGHT:
     /* Sidebar expanders (groups) */
     section[data-testid="stSidebar"] details {
         border: none !important; background: transparent !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stExpander"] {
+        background: transparent !important; border: none !important;
+        border-radius: 0 !important; box-shadow: none !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stExpander"]:hover {
+        border-color: transparent !important;
     }
     section[data-testid="stSidebar"] .streamlit-expanderHeader {
         color: var(--t3) !important; background: transparent !important;
@@ -1241,6 +1361,55 @@ _components.html(f"""<script>
 }})();
 </script>""", height=0)
 
+# === JS FIX: Mobile — auto-close sidebar after nav click, clean transition ===
+_components.html("""<script>
+(function() {
+    const isMobile = () => window.innerWidth <= 768;
+
+    function closeSidebar() {
+        // Click the collapse button
+        const collapseBtn = document.querySelector('[data-testid="stSidebarCollapsedControl"] button, [data-testid="collapsedControl"] button');
+        if (collapseBtn) { collapseBtn.click(); return; }
+        // Fallback: set attribute
+        const sidebar = document.querySelector('section[data-testid="stSidebar"]');
+        if (sidebar) sidebar.setAttribute('aria-expanded', 'false');
+    }
+
+    function clearMainContent() {
+        const main = document.querySelector('.main .block-container');
+        if (main) {
+            main.style.opacity = '0';
+            main.style.transition = 'opacity 0.15s ease';
+            setTimeout(() => { main.style.opacity = '1'; }, 300);
+        }
+    }
+
+    // Watch for button clicks inside sidebar
+    function attachNavListeners() {
+        const sidebar = document.querySelector('section[data-testid="stSidebar"]');
+        if (!sidebar) return;
+
+        sidebar.addEventListener('click', function(e) {
+            if (!isMobile()) return;
+            const btn = e.target.closest('button');
+            if (!btn) return;
+            // Skip theme/logout buttons (they have specific keys)
+            const key = btn.getAttribute('data-testid') || '';
+            if (key.includes('theme') || key.includes('logout') || key.includes('refresh')) return;
+            // Nav button clicked — close sidebar + clean transition
+            clearMainContent();
+            setTimeout(closeSidebar, 100);
+        }, true);
+    }
+
+    // Run after DOM ready
+    if (document.readyState === 'complete') attachNavListeners();
+    else window.addEventListener('load', attachNavListeners);
+    // Also re-attach on mutations (Streamlit rerenders)
+    new MutationObserver(attachNavListeners).observe(document.body, {childList:true, subtree:true});
+})();
+</script>""", height=0)
+
 with st.sidebar:
     # --- Логотип + слоган ---
     _logo_filter = "invert(1)" if not IS_LIGHT else "none"
@@ -1250,9 +1419,17 @@ with st.sidebar:
     </div>''', unsafe_allow_html=True)
     st.caption("Интеллект ресторана · Эволюция")
     # --- Пользователь + тема ---
-    u_col, theme_col, logout_col = st.columns([3, 1, 1])
+    u_col, refresh_col, theme_col, logout_col = st.columns([3, 1, 1, 1])
     with u_col:
         st.markdown(f"**{CURRENT_USER['name']}**")
+    with refresh_col:
+        if st.button("🔄", key="refresh_btn", help="Обновить данные"):
+            st.cache_data.clear()
+            # Clear page-level caches
+            for k in list(st.session_state.keys()):
+                if k.startswith("_pdata_") or k.startswith("sh_purchases_") or k.startswith("_qc_") or k.startswith("_stock_"):
+                    del st.session_state[k]
+            st.rerun()
     with theme_col:
         theme_icon = "☀️" if IS_LIGHT else "🌙"
         if st.button(theme_icon, key="theme_btn", help="Светлая/тёмная тема"):
@@ -1264,15 +1441,19 @@ with st.sidebar:
         if st.button("↗", key="logout_btn", help="Выйти"):
             st.session_state.pop("_auth_user", None)
             st.rerun()
+    # Личный кабинет — под именем пользователя
+    if st.button("Личный кабинет", key="nav_lk_top", use_container_width=True):
+        st.session_state["_page"] = "Личный кабинет"
+        st.rerun()
 
 # --- Period selector function (called inside each page) ---
 def period_selector(key_suffix="main"):
     """Inline period selector — returns (date_from, date_to)."""
     today = datetime.now().date()
     if "_period" not in st.session_state:
-        st.session_state["_period"] = "7 дней"
+        st.session_state["_period"] = "Сегодня"
     if "_date_from" not in st.session_state:
-        st.session_state["_date_from"] = today - timedelta(7)
+        st.session_state["_date_from"] = today
         st.session_state["_date_to"] = today
 
     with st.container():
@@ -1300,7 +1481,7 @@ def period_selector(key_suffix="main"):
 
 # Default period (used before any page calls period_selector)
 today = datetime.now().date()
-date_from = st.session_state.get("_date_from", today - timedelta(7))
+date_from = st.session_state.get("_date_from", today)
 date_to = st.session_state.get("_date_to", today)
 
 if not IS_DEMO:
@@ -1337,7 +1518,7 @@ def load_cashgroups():
 # ============================================================
 # ЗАПРОСЫ ДАННЫХ
 # ============================================================
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_orders(d1, d2):
     return run_query("""
         SELECT VISIT, MIDSERVER, IDENTINVISIT, OPENTIME, ENDSERVICE,
@@ -1346,7 +1527,7 @@ def load_orders(d1, d2):
         FROM ORDERS WHERE OPENTIME >= %s AND OPENTIME < DATEADD(DAY,1,%s)
           AND (DBSTATUS IS NULL OR DBSTATUS!=-1) ORDER BY OPENTIME DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_dishes(d1, d2):
     return run_query("""
         SELECT TOP 30 sd.SIFR as DISH_ID, mi.NAME as DISH_NAME,
@@ -1359,7 +1540,7 @@ def load_dishes(d1, d2):
           AND (sd.DBSTATUS IS NULL OR sd.DBSTATUS!=-1) AND sd.QUANTITY>0
         GROUP BY sd.SIFR, mi.NAME ORDER BY TOTAL_SUM DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_payments(d1, d2):
     return run_query("""
         SELECT p.PAYLINETYPE, SUM(p.BASICSUM) as TOTAL_SUM, COUNT(*) as PAY_COUNT
@@ -1368,7 +1549,7 @@ def load_payments(d1, d2):
           AND (p.DBSTATUS IS NULL OR p.DBSTATUS!=-1) AND p.STATE=6
         GROUP BY p.PAYLINETYPE""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_check_count(d1, d2):
     """Кол-во уникальных чеков (PRINTCHECKUNI) — ближе к ОФД чем кол-во заказов."""
     return run_query("""
@@ -1381,7 +1562,7 @@ def load_check_count(d1, d2):
           AND (p.DBSTATUS IS NULL OR p.DBSTATUS!=-1)
           AND (o.DBSTATUS IS NULL OR o.DBSTATUS!=-1) AND o.PAID=1""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_tax_breakdown(d1, d2):
     """Выручка по ставкам НДС из SESSIONDISHES.ITAXDISHTYPE → TAXDISHTYPES."""
     return run_query("""
@@ -1401,7 +1582,7 @@ def load_tax_breakdown(d1, d2):
         GROUP BY tdt.NAME, sd.ITAXDISHTYPE
         ORDER BY SUM(sd.PRLISTSUM) DESC""", (str(d1), str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_fiscal_checks(d1, d2):
     """Статистика фискальных чеков из PRINTCHECKS по кассам/столовым."""
     return run_query("""
@@ -1424,7 +1605,7 @@ def load_fiscal_checks(d1, d2):
         GROUP BY r.NAME, cg.NAME
         ORDER BY TOTAL_CHECKS DESC""", (str(d1), str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_fiscal_summary(d1, d2):
     """Общая сводка фискальных чеков."""
     return run_query("""
@@ -1441,7 +1622,7 @@ def load_fiscal_summary(d1, d2):
         WHERE CLOSEDATETIME >= %s AND CLOSEDATETIME < DATEADD(DAY,1,%s)
           AND (DBSTATUS IS NULL OR DBSTATUS!=-1)""", (str(d1), str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_voids(d1, d2):
     return run_query("""
         SELECT dv.OPENNAME as VOID_REASON, dv.DATETIME, dv.QUANTITY, dv.PRLISTSUM, dv.DISHUNI,
@@ -1460,7 +1641,7 @@ def load_voids(d1, d2):
         WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
           AND (dv.DBSTATUS IS NULL OR dv.DBSTATUS!=-1)""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_deleted_checks(d1, d2):
     """Отменённые (удалённые) чеки"""
     return run_query("""
@@ -1486,7 +1667,7 @@ def load_deleted_checks(d1, d2):
           AND (pc.DBSTATUS IS NULL OR pc.DBSTATUS!=-1)
         ORDER BY pc.DELETEDATETIME DESC""", (str(d1),str(d2),str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_cancel_operations(d1, d2):
     """Операции отмен из журнала"""
     return run_query("""
@@ -1505,7 +1686,7 @@ def load_cancel_operations(d1, d2):
           AND ol.OPERATION IN (228, 460, 482, 206, 904, 261)
         ORDER BY ol.DATETIME DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_payments_by_type(d1, d2):
     """Платежи по типам оплат"""
     return run_query("""
@@ -1519,7 +1700,7 @@ def load_payments_by_type(d1, d2):
           AND (p.DBSTATUS IS NULL OR p.DBSTATUS!=-1)
         GROUP BY p.PAYLINETYPE, p.STATE, e.NAME""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_cashier_speed(d1, d2):
     """Скорость обслуживания по кассирам"""
     return run_query("""
@@ -1539,7 +1720,7 @@ def load_cashier_speed(d1, d2):
           AND o.MAINWAITER > 0
         GROUP BY e.NAME ORDER BY AVG(o.DURATION)""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_speed_distribution(d1, d2):
     """Распределение заказов по времени обслуживания"""
     return run_query("""
@@ -1570,7 +1751,7 @@ def load_speed_distribution(d1, d2):
             END
         ORDER BY 1""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_speed_by_hour(d1, d2):
     """Средняя скорость по часам дня"""
     return run_query("""
@@ -1583,7 +1764,7 @@ def load_speed_by_hour(d1, d2):
           AND DURATION > 0 AND DURATION < 3600
         GROUP BY DATEPART(HOUR, OPENTIME) ORDER BY HOUR""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_speed_by_restaurant(d1, d2):
     """Средняя скорость по столовым"""
     return run_query("""
@@ -1599,7 +1780,7 @@ def load_speed_by_restaurant(d1, d2):
           AND o.DURATION > 0 AND o.DURATION < 3600 AND r.NAME IS NOT NULL
         GROUP BY r.NAME ORDER BY AVG(o.DURATION)""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_card_problems(d1, d2):
     """Проблемы с банковскими картами"""
     return run_query("""
@@ -1614,7 +1795,7 @@ def load_card_problems(d1, d2):
           AND (pe.DBSTATUS IS NULL OR pe.DBSTATUS!=-1)
         GROUP BY pe.TRANSACTIONSTATUS, pe.AUTHTYPE, r.NAME""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_hourly(d1, d2):
     return run_query("""
         SELECT DATEPART(HOUR,OPENTIME) as HOUR,
@@ -1624,7 +1805,7 @@ def load_hourly(d1, d2):
           AND (DBSTATUS IS NULL OR DBSTATUS!=-1) AND PAID=1
         GROUP BY DATEPART(HOUR,OPENTIME) ORDER BY HOUR""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_daily(d1, d2):
     return run_query("""
         SELECT CAST(OPENTIME AS DATE) as DAY,
@@ -1636,7 +1817,7 @@ def load_daily(d1, d2):
 
 # --- НОВЫЕ ЗАПРОСЫ ---
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_revenue_by_restaurant(d1, d2):
     return run_query("""
         SELECT gs.IRESTAURANT as REST_ID, r.NAME as REST_NAME,
@@ -1650,7 +1831,7 @@ def load_revenue_by_restaurant(d1, d2):
           AND (o.DBSTATUS IS NULL OR o.DBSTATUS!=-1) AND o.PAID=1 AND r.NAME IS NOT NULL
         GROUP BY gs.IRESTAURANT, r.NAME ORDER BY REVENUE DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_revenue_by_category(d1, d2):
     return run_query("""
         SELECT TOP 20 c.SIFR as CAT_ID, c.NAME as CATEGORY,
@@ -1665,7 +1846,7 @@ def load_revenue_by_category(d1, d2):
           AND c.NAME IS NOT NULL
         GROUP BY c.SIFR, c.NAME ORDER BY TOTAL_SUM DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_dishes_by_category(d1, d2, cat_id):
     """Топ блюд внутри конкретной категории."""
     return run_query("""
@@ -1681,7 +1862,7 @@ def load_dishes_by_category(d1, d2, cat_id):
           AND mi.PARENT = %s
         GROUP BY mi.NAME ORDER BY TOTAL_SUM DESC""", (str(d1), str(d2), int(cat_id)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_top_employees(d1, d2):
     return run_query("""
         SELECT TOP 20 o.MAINWAITER as EMP_ID, e.NAME as EMP_NAME,
@@ -1694,7 +1875,7 @@ def load_top_employees(d1, d2):
           AND (o.DBSTATUS IS NULL OR o.DBSTATUS!=-1) AND o.PAID=1 AND o.MAINWAITER>0
         GROUP BY o.MAINWAITER, e.NAME ORDER BY REVENUE DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_monthly_revenue_yoy():
     """Помесячная выручка за все доступные годы — для сезонности год к году."""
     return run_query("""
@@ -1713,7 +1894,7 @@ def load_monthly_revenue_yoy():
         GROUP BY YEAR(o.OPENTIME), MONTH(o.OPENTIME), FORMAT(o.OPENTIME, 'yyyy-MM')
         ORDER BY Y, M""")
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_clockrecs(d1, d2):
     return run_query("""
         SELECT cr.EMPID, e.NAME as EMP_NAME,
@@ -1727,7 +1908,7 @@ def load_clockrecs(d1, d2):
           AND (cr.DBSTATUS IS NULL OR cr.DBSTATUS!=-1)
         GROUP BY cr.EMPID, e.NAME ORDER BY SHIFT_COUNT DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_cashinout(d1, d2):
     return run_query("""
         SELECT DATETIME, ISDEPOSIT, ORIGINALSUM, KIND, MIDSERVER,
@@ -1737,7 +1918,7 @@ def load_cashinout(d1, d2):
           AND (DBSTATUS IS NULL OR DBSTATUS!=-1)
         ORDER BY DATETIME DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_daily_by_restaurant(d1, d2):
     return run_query("""
         SELECT CAST(o.OPENTIME AS DATE) as DAY, r.NAME as REST_NAME,
@@ -1755,7 +1936,7 @@ def load_daily_by_restaurant(d1, d2):
 
 # --- PRICE & ABC QUERIES ---
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_shifts(d1, d2):
     return run_query("""
         SELECT gs.SHIFTDATE, gs.CREATETIME, gs.CLOSETIME, gs.CLOSED,
@@ -1768,7 +1949,7 @@ def load_shifts(d1, d2):
           AND r.NAME IS NOT NULL
         ORDER BY gs.CREATETIME DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_checkmark_errors(d1, d2):
     return run_query("""
         SELECT cm.DATETIME, cm.RES, cm.MESSAGEFROMDRIVER, cm.ERRORCODE,
@@ -1782,7 +1963,7 @@ def load_checkmark_errors(d1, d2):
           AND cm.RES != 0
         ORDER BY cm.DATETIME DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_checkmark_stats(d1, d2):
     return run_query("""
         SELECT cm.RES, COUNT(*) as CNT
@@ -1790,7 +1971,7 @@ def load_checkmark_stats(d1, d2):
         WHERE cm.DATETIME >= %s AND cm.DATETIME < DATEADD(DAY,1,%s)
         GROUP BY cm.RES""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_card_errors(d1, d2):
     return run_query("""
         SELECT pe.TRANSACTIONSTATUS, COUNT(*) as CNT
@@ -1800,7 +1981,7 @@ def load_card_errors(d1, d2):
           AND (pe.DBSTATUS IS NULL OR pe.DBSTATUS!=-1)
         GROUP BY pe.TRANSACTIONSTATUS""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_card_errors_by_restaurant(d1, d2):
     """Проблемы с картами по столовым — статусы 0 (нет транзакции), 1 (отменена), 6 (возврат)."""
     return run_query("""
@@ -1817,7 +1998,7 @@ def load_card_errors_by_restaurant(d1, d2):
         GROUP BY r.NAME, pe.TRANSACTIONSTATUS
         ORDER BY CNT DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_price_history(d1, d2):
     return run_query("""
         SELECT CAST(o.OPENTIME AS DATE) as DAY, mi.NAME as DISH_NAME,
@@ -1831,7 +2012,7 @@ def load_price_history(d1, d2):
         GROUP BY CAST(o.OPENTIME AS DATE), mi.NAME
         ORDER BY DAY""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_current_prices(d1, d2):
     """Блюда с изменёнными ценами"""
     return run_query("""
@@ -1851,7 +2032,7 @@ def load_current_prices(d1, d2):
         HAVING COUNT(DISTINCT sd.PRICE) > 1
         ORDER BY MAX(sd.PRICE) - MIN(sd.PRICE) DESC""", (str(d1),str(d2)))
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_abc_analysis(d1, d2):
     """ABC-анализ по выручке"""
     return run_query("""
@@ -1871,7 +2052,7 @@ def load_abc_analysis(d1, d2):
 
 # --- PROACTIVE ANALYSIS ---
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_period_comparison(d1, d2):
     """Сравнение текущего и предыдущего периода по столовым"""
     days = (d2 - d1).days + 1
@@ -1904,7 +2085,7 @@ def load_period_comparison(d1, d2):
     
     return current, previous, days, prev_d1, prev_d2
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_period_totals(d1, d2):
     """Общие метрики за два периода"""
     days = (d2 - d1).days + 1
@@ -1929,7 +2110,7 @@ def load_period_totals(d1, d2):
     
     return cur, prev, days, prev_d1, prev_d2
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_voids_comparison(d1, d2):
     days = (d2 - d1).days + 1
     prev_d2 = d1 - timedelta(days=1)
@@ -1949,7 +2130,7 @@ def load_voids_comparison(d1, d2):
     
     return cur, prev
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_dishes_comparison(d1, d2):
     days = (d2 - d1).days + 1
     prev_d2 = d1 - timedelta(days=1)
@@ -2151,7 +2332,7 @@ def sh_stat_query(query, params=None):
     except Exception as e:
         return pd.DataFrame()
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
 def sh_stat_goodgroups():
     """Группы товаров из SQL (89 групп, иерархия)"""
     return sh_stat_query("""
@@ -2159,7 +2340,7 @@ def sh_stat_goodgroups():
         FROM STAT_SH4_SHIFTS_GOODGROUPS
         ORDER BY PARENTRID, NAME""")
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
 def sh_stat_corr():
     """Контрагенты/поставщики из SQL (512 записей)"""
     return sh_stat_query("""
@@ -2167,7 +2348,7 @@ def sh_stat_corr():
         FROM STAT_SH4_SHIFTS_CORR
         ORDER BY TYPECORR, NAME""")
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_stat_invoices():
     """Накладные из SQL"""
     return sh_stat_query("""
@@ -2177,7 +2358,7 @@ def sh_stat_invoices():
         FROM STAT_SH4_SHIFTS_INVOICES
         ORDER BY INVOICEDATE DESC""")
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_stat_table_counts():
     """Количество записей во всех таблицах статистики"""
     tables = ["STAT_SH4_SHIFTS_ATTR", "STAT_SH4_SHIFTS_BALANCE_LIST", "STAT_SH4_SHIFTS_CORR",
@@ -2222,7 +2403,7 @@ def sh_load_gdoc(rid, doc_type_id):
     items = sh_parse_table(data, 1) if len(tables) > 1 else pd.DataFrame()
     return header, items, None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_all_docs_from_sql():
     """Загрузить все документы: RID из SQL → детали из GDoc API"""
     invoices = sh_stat_invoices()
@@ -2291,7 +2472,7 @@ def sh_load_all_docs_from_sql():
 
 # --- Расчётный фудкост: сопоставление SH + RK ---
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def load_rk_dish_prices(d1, d2):
     """Средние цены продажи блюд из R-Keeper"""
     return run_query("""
@@ -2308,7 +2489,7 @@ def load_rk_dish_prices(d1, d2):
         GROUP BY mi.NAME
         ORDER BY SUM(sd.PRLISTSUM) DESC""", (str(d1), str(d2)))
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
 def load_rk_monthly_sales(d1, d2):
     """Продажи по блюдам и месяцам из R-Keeper — для помесячного фудкоста"""
     return run_query("""
@@ -2435,20 +2616,20 @@ def match_foodcost(rk_dishes, sh_goods, purchase_prices=None):
 
 # --- Процедуры, требующие доп. прав ---
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_remains():
     """Остатки на складах (Remains) — требует права"""
     df, err = sh_exec("Remains")
     return df, err
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_remains_depart(depart_rid):
     """Остатки по конкретному складу"""
     params = [{"head": "111", "original": ["Rid"], "values": [[depart_rid]]}]
     df, err = sh_exec("Remains", params)
     return df, err
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_selling(date_from_str, date_to_str):
     """Продажи (Selling) — требует права"""
     params = [{"head": "111", "original": ["DateFrom", "DateTo"],
@@ -2456,7 +2637,7 @@ def sh_load_selling(date_from_str, date_to_str):
     df, err = sh_exec("Selling", params)
     return df, err
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_foodcost_api(date_from_str, date_to_str):
     """Фудкост (FoodCost) — требует права"""
     params = [{"head": "111", "original": ["DateFrom", "DateTo"],
@@ -2464,7 +2645,7 @@ def sh_load_foodcost_api(date_from_str, date_to_str):
     df, err = sh_exec("FoodCost", params)
     return df, err
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_selling_foodcost(d1, d2):
     """Фудкост из STAT_SH4_SHIFTS_SELLING — экспорт StoreHouse → SQL.
     Содержит закупочные и продажные цены по каждому товару за день."""
@@ -2477,7 +2658,7 @@ def load_selling_foodcost(d1, d2):
         FROM STAT_SH4_SHIFTS_SELLING s
         WHERE s.SELLINGDATE >= %s AND s.SELLINGDATE < DATEADD(DAY,1,%s)""", (str(d1), str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_selling_foodcost_summary(d1, d2):
     """Сводка фудкоста по дням из SELLING."""
     return run_query("""
@@ -2490,7 +2671,7 @@ def load_selling_foodcost_summary(d1, d2):
         GROUP BY CAST(s.SELLINGDATE AS DATE)
         ORDER BY SELL_DATE""", (str(d1), str(d2)))
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=3600)
 def load_selling_foodcost_by_group(d1, d2):
     """Фудкост по группам товаров из SELLING."""
     return run_query("""
@@ -2505,7 +2686,7 @@ def load_selling_foodcost_by_group(d1, d2):
         GROUP BY g.GOODGROUPNAME
         ORDER BY SELLING DESC""", (str(d1), str(d2)))
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_invoices(date_from_str, date_to_str):
     """Накладные (Invoices) — требует права"""
     params = [{"head": "111", "original": ["DateFrom", "DateTo"],
@@ -2513,7 +2694,7 @@ def sh_load_invoices(date_from_str, date_to_str):
     df, err = sh_exec("Invoices", params)
     return df, err
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_trial_balance(date_from_str, date_to_str):
     """Оборотная ведомость (TrialBalance) — требует права"""
     params = [{"head": "111", "original": ["DateFrom", "DateTo"],
@@ -2521,7 +2702,7 @@ def sh_load_trial_balance(date_from_str, date_to_str):
     df, err = sh_exec("TrialBalance", params)
     return df, err
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_documents_api(date_from_str, date_to_str):
     """Документы (Documents) — требует права"""
     params = [{"head": "111", "original": ["DateFrom", "DateTo"],
@@ -2533,7 +2714,7 @@ def sh_load_documents_api(date_from_str, date_to_str):
 # ЗАКУПОЧНЫЕ ЦЕНЫ ИЗ ПРИХОДНЫХ НАКЛАДНЫХ (РЕАЛЬНЫЙ ФУДКОСТ)
 # ============================================================
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
 def sh_load_gdoc0_ext_list(date_from_str, date_to_str):
     """Список приходных накладных за период (GDoc0ExtList).
     Таблица 0 = head 108 (эхо входных параметров, 1 строка) — ПРОПУСКАЕМ
@@ -2757,7 +2938,7 @@ def sh_load_purchase_prices(date_from_str, date_to_str, progress_container=None,
         st_text.empty()
 
     if not all_items:
-        return pd.DataFrame(), f"Нет позиций в {len(rids)} накладных ({errors} ошибок)"
+        return pd.DataFrame(), f"Найдено {len(rids)} накладных, но товарные позиции пусты ({errors} ошибок API). Возможно, накладные ещё не заполнены в SH."
 
     items_df = pd.DataFrame(all_items)
 
@@ -2782,7 +2963,7 @@ def sh_load_purchase_prices(date_from_str, date_to_str, progress_container=None,
 # СКЛАД: движение товаров, перемещения, сроки годности
 # ============================================================
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_gdoc1_5_list(date_from_str, date_to_str, doc_type=4):
     """Список документов типов 1-5 за период (GDoc1_5LstDocs).
     doc_type: 1=расходная, 4=перемещение, 5=инвентаризация.
@@ -2845,7 +3026,7 @@ def sh_load_gdoc4_items(rid):
             best_df = df
     return header, best_df, None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
 def sh_load_transfers(date_from_str, date_to_str, _progress_container=None, max_rids=100):
     """Полный пайплайн перемещений: список + детали каждого.
     1) GDoc1_5LstDocs type=4 → список RID перемещений
@@ -2906,7 +3087,8 @@ def sh_load_transfers(date_from_str, date_to_str, _progress_container=None, max_
     items_df = pd.concat(all_items, ignore_index=True) if all_items else pd.DataFrame()
     return list_df, items_df, None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def sh_load_stock(date_str="2026-03-14", by_depart=True):
     """Остатки товаров через GRemns.
     date_str: дата на которую считать остатки
@@ -2965,6 +3147,44 @@ def sh_load_stock(date_str="2026-03-14", by_depart=True):
         df = df[df["QTY"] != 0].copy()
 
     return df.reset_index(drop=True), None
+
+@st.cache_data(ttl=3600)
+def sh_load_stock_dynamics(date_from_str, date_to_str):
+    """Остатки (GRemns) за каждый день в диапазоне → DataFrame[DATE, DEPART, AMOUNT, QTY, PRODUCTS].
+    Загружает по складам (by_depart=True) и агрегирует по дням + складам."""
+    from datetime import datetime as _dt, timedelta as _td
+    d1 = _dt.strptime(date_from_str, "%Y-%m-%d").date()
+    d2 = _dt.strptime(date_to_str, "%Y-%m-%d").date()
+    days = []
+    d = d1
+    while d <= d2:
+        days.append(d)
+        d += _td(1)
+    # Limit to 31 days
+    if len(days) > 31:
+        step = max(1, len(days) // 31)
+        days = days[::step]
+        if days[-1] != d2:
+            days.append(d2)
+    rows = []
+    for day in days:
+        stock, err = sh_load_stock(str(day), by_depart=True)
+        if err or stock.empty:
+            continue
+        if "DEPART" in stock.columns and "AMOUNT" in stock.columns:
+            by_dep = stock.groupby("DEPART").agg(
+                AMOUNT=("AMOUNT", "sum"),
+                QTY=("QTY", "sum") if "QTY" in stock.columns else ("AMOUNT", "count"),
+                PRODUCTS=("PRODUCT_NAME", "nunique") if "PRODUCT_NAME" in stock.columns else ("AMOUNT", "count"),
+            ).reset_index()
+            for _, r in by_dep.iterrows():
+                rows.append({"DATE": str(day), "DEPART": r["DEPART"], "AMOUNT": r["AMOUNT"],
+                             "QTY": r.get("QTY", 0), "PRODUCTS": r.get("PRODUCTS", 0)})
+        elif "AMOUNT" in stock.columns:
+            rows.append({"DATE": str(day), "DEPART": "Все", "AMOUNT": stock["AMOUNT"].sum(),
+                         "QTY": stock["QTY"].sum() if "QTY" in stock.columns else 0,
+                         "PRODUCTS": stock["PRODUCT_NAME"].nunique() if "PRODUCT_NAME" in stock.columns else 0})
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 def sh_load_incoming_full(date_from_str, date_to_str, _progress_container=None, max_rids=200):
     """Единая загрузка приходных накладных: товары + склады + поставщики за один проход.
@@ -3496,6 +3716,7 @@ PAGES_ALL = [
     "Смены", "Проблемы", "Отказы", "Заказы",
     "Склад", "Накладные", "Фудкост", "Фудкост (расчёт)", "Склад: Схема",
     "Доход/Расход",
+    "Личный кабинет",
     "ИИ-чат", "Проактив"
 ]
 
@@ -3550,7 +3771,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v8.5")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.8")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -3609,6 +3830,9 @@ def page_header(title, icon="", show_period=True):
         refresh = st.button("Обновить", key=f"refresh_{title}", use_container_width=True)
     if refresh:
         st.cache_data.clear()
+        for k in list(st.session_state.keys()):
+            if k.startswith("_pdata_") or k.startswith("sh_purchases_") or k.startswith("_qc_") or k.startswith("_stock_"):
+                del st.session_state[k]
         st.rerun()
     if show_period:
         date_from, date_to = period_selector(key_suffix=title.replace(" ","_"))
@@ -3616,7 +3840,10 @@ def page_header(title, icon="", show_period=True):
     return refresh
 
 def fix_bar_hover(fig):
-    """Fix Plotly charts: hover tooltips, pie legends, gridlines for light theme."""
+    """Fix Plotly charts: hover tooltips, pie legends, gridlines, undefined title."""
+    # Fix "undefined" title bug in plotly_dark template
+    if not fig.layout.title or not fig.layout.title.text:
+        fig.update_layout(title="")
     for trace in fig.data:
         if hasattr(trace, 'type') and trace.type == 'bar' and trace.text is not None:
             if not trace.hovertemplate:
@@ -3643,48 +3870,68 @@ if page == "Пульс":
     yesterday = today - timedelta(1)
 
     # --- Load data: today, yesterday, this week, last week ---
-    with st.spinner("Загрузка..."):
-        ord_today = load_orders(today, today)
-        ord_yest = load_orders(yesterday, yesterday)
-        ord_period = load_orders(date_from, date_to)
+    # Cache in session_state so page switches don't reload
+    _pulse_key = f"_pdata_pulse_{date_from}_{date_to}"
+    if _pulse_key not in st.session_state:
+        with st.spinner("Загрузка..."):
+            _pd = {}
+            _pd["ord_today"] = load_orders(today, today)
+            _pd["ord_yest"] = load_orders(yesterday, yesterday)
+            _pd["ord_period"] = load_orders(date_from, date_to)
 
-        # Previous period same length
-        period_days = (date_to - date_from).days or 1
-        prev_from = date_from - timedelta(period_days)
-        prev_to = date_from - timedelta(1)
-        ord_prev = load_orders(prev_from, prev_to)
+            # Previous period same length
+            period_days = (date_to - date_from).days or 1
+            prev_from = date_from - timedelta(period_days)
+            prev_to = date_from - timedelta(1)
+            _pd["prev_from"] = prev_from
+            _pd["prev_to"] = prev_to
+            _pd["period_days"] = period_days
+            _pd["ord_prev"] = load_orders(prev_from, prev_to)
 
-        rest_data = run_query("""
-            SELECT r.NAME as REST_NAME,
-                SUM(o.TOPAYSUM) as REVENUE, COUNT(*) as ORDERS,
-                AVG(o.TOPAYSUM) as AVG_CHECK, SUM(o.GUESTSCOUNT) as GUESTS
-            FROM ORDERS o
-            JOIN GLOBALSHIFTS gs ON o.MIDSERVER=gs.MIDSERVER AND o.ICOMMONSHIFT=gs.SHIFTNUM
-            JOIN RESTAURANTS r ON gs.IRESTAURANT=r.SIFR
-            WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
-              AND (o.DBSTATUS IS NULL OR o.DBSTATUS!=-1) AND o.PAID=1
-            GROUP BY r.NAME ORDER BY REVENUE DESC""", (str(date_from), str(date_to)))
+            _pd["rest_data"] = run_query("""
+                SELECT r.NAME as REST_NAME,
+                    SUM(o.TOPAYSUM) as REVENUE, COUNT(*) as ORDERS,
+                    AVG(o.TOPAYSUM) as AVG_CHECK, SUM(o.GUESTSCOUNT) as GUESTS
+                FROM ORDERS o
+                JOIN GLOBALSHIFTS gs ON o.MIDSERVER=gs.MIDSERVER AND o.ICOMMONSHIFT=gs.SHIFTNUM
+                JOIN RESTAURANTS r ON gs.IRESTAURANT=r.SIFR
+                WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
+                  AND (o.DBSTATUS IS NULL OR o.DBSTATUS!=-1) AND o.PAID=1
+                GROUP BY r.NAME ORDER BY REVENUE DESC""", (str(date_from), str(date_to)))
 
-        voids_cnt = run_query("""
-            SELECT COUNT(*) as CNT, SUM(dv.PRLISTSUM) as TOTAL
-            FROM DISHVOIDS dv
-            JOIN ORDERS o ON dv.VISIT=o.VISIT AND dv.MIDSERVER=o.MIDSERVER AND dv.ORDERIDENT=o.IDENTINVISIT
-            WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
-              AND (dv.DBSTATUS IS NULL OR dv.DBSTATUS!=-1)""", (str(date_from), str(date_to)))
+            _pd["voids_cnt"] = run_query("""
+                SELECT COUNT(*) as CNT, SUM(dv.PRLISTSUM) as TOTAL
+                FROM DISHVOIDS dv
+                JOIN ORDERS o ON dv.VISIT=o.VISIT AND dv.MIDSERVER=o.MIDSERVER AND dv.ORDERIDENT=o.IDENTINVISIT
+                WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
+                  AND (dv.DBSTATUS IS NULL OR dv.DBSTATUS!=-1)""", (str(date_from), str(date_to)))
 
-        # Data coverage: which restaurants have data vs total
-        coverage = run_query("""
-            SELECT
-                (SELECT COUNT(*) FROM RESTAURANTS WHERE NAME IS NOT NULL AND STATUS > 0) as TOTAL_REST,
-                COUNT(DISTINCT r.SIFR) as ACTIVE_REST,
-                COUNT(DISTINCT o.MIDSERVER) as ACTIVE_SERVERS,
-                (SELECT COUNT(*) FROM CASHGROUPS WHERE NAME IS NOT NULL AND (DBSTATUS IS NULL OR DBSTATUS!=-1)) as TOTAL_SERVERS,
-                MAX(o.OPENTIME) as LAST_ORDER
-            FROM ORDERS o
-            JOIN GLOBALSHIFTS gs ON o.MIDSERVER=gs.MIDSERVER AND o.ICOMMONSHIFT=gs.SHIFTNUM
-            JOIN RESTAURANTS r ON gs.IRESTAURANT=r.SIFR
-            WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
-              AND (o.DBSTATUS IS NULL OR o.DBSTATUS!=-1) AND o.PAID=1""", (str(date_from), str(date_to)))
+            _pd["coverage"] = run_query("""
+                SELECT
+                    (SELECT COUNT(*) FROM RESTAURANTS WHERE NAME IS NOT NULL AND STATUS > 0) as TOTAL_REST,
+                    COUNT(DISTINCT r.SIFR) as ACTIVE_REST,
+                    COUNT(DISTINCT o.MIDSERVER) as ACTIVE_SERVERS,
+                    (SELECT COUNT(DISTINCT MIDSERVER) FROM ORDERS WHERE OPENTIME >= DATEADD(DAY,-7,GETDATE()) AND (DBSTATUS IS NULL OR DBSTATUS!=-1) AND PAID=1) as TOTAL_SERVERS,
+                    MAX(o.OPENTIME) as LAST_ORDER
+                FROM ORDERS o
+                JOIN GLOBALSHIFTS gs ON o.MIDSERVER=gs.MIDSERVER AND o.ICOMMONSHIFT=gs.SHIFTNUM
+                JOIN RESTAURANTS r ON gs.IRESTAURANT=r.SIFR
+                WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
+                  AND (o.DBSTATUS IS NULL OR o.DBSTATUS!=-1) AND o.PAID=1""", (str(date_from), str(date_to)))
+
+            st.session_state[_pulse_key] = _pd
+
+    _pd = st.session_state[_pulse_key]
+    ord_today = _pd["ord_today"]
+    ord_yest = _pd["ord_yest"]
+    ord_period = _pd["ord_period"]
+    ord_prev = _pd["ord_prev"]
+    rest_data = _pd["rest_data"]
+    voids_cnt = _pd["voids_cnt"]
+    coverage = _pd["coverage"]
+    prev_from = _pd["prev_from"]
+    prev_to = _pd["prev_to"]
+    period_days = _pd["period_days"]
 
     # === HELPERS ===
     def safe_sum(df, col):
@@ -3721,7 +3968,12 @@ if page == "Пульс":
     t1 = "var(--t1)"
 
     st.markdown("### Ключевые показатели")
-    c1, c2, c3, c4, c5 = st.columns(5)
+    is_today_period = (date_from == datetime.now().date() and date_to == datetime.now().date())
+
+    if is_today_period:
+        c1, c2, c3, c4 = st.columns(4)
+    else:
+        c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
         d = pct_change(rev_period, rev_prev)
         st.metric("Выручка", f"{rev_period:,.0f} ₽", delta_fmt(d))
@@ -3733,9 +3985,13 @@ if page == "Пульс":
         st.metric("Ср. чек", f"{avg_check:,.0f} ₽", delta_fmt(d))
     with c4:
         st.metric("Гостей", f"{int(guests_period):,}")
-    with c5:
-        st.metric("Сегодня", f"{rev_today:,.0f} ₽",
-                   delta_fmt(pct_change(rev_today, rev_yest)) if rev_yest else "")
+    if not is_today_period:
+        with c5:
+            st.metric("Сегодня", f"{rev_today:,.0f} ₽",
+                       delta_fmt(pct_change(rev_today, rev_yest)) if rev_yest else "")
+
+    st.caption(f"% — изменение к предыдущему периоду ({prev_from} → {prev_to})." +
+               (" «Сегодня» — vs вчера." if not is_today_period else ""))
 
     # === DATA COVERAGE STRIP ===
     if not coverage.empty:
@@ -3782,6 +4038,212 @@ if page == "Пульс":
             <span style="font-size:.75rem;color:var(--t3);">·</span>
             <span style="font-size:.68rem;padding:2px 8px;border-radius:8px;background:{cov_color}20;color:{cov_color};font-weight:600;">{cov_status}</span>
         </div>""", unsafe_allow_html=True)
+
+    # ============================================================
+    # ROW 1.5: FINANCIAL & OPERATIONAL METRICS
+    # ============================================================
+    st.divider()
+    st.markdown("### Финансы и операции")
+
+    # Cache financial data in session_state
+    _pfin_key = f"_pdata_pulse_fin_{date_from}_{date_to}"
+    if _pfin_key not in st.session_state:
+        _pf = {}
+        _pf["tax_data"] = pd.DataFrame()
+        try:
+            _pf["tax_data"] = run_query("""
+                SELECT tdt.NAME as TAX_LABEL, CAST(SUM(sd.PRLISTSUM) AS INT) as REVENUE
+                FROM SESSIONDISHES sd
+                JOIN TAXDISHTYPES tdt ON sd.ITAXDISHTYPE=tdt.SIFR
+                JOIN ORDERS o ON sd.VISIT=o.VISIT AND sd.MIDSERVER=o.MIDSERVER AND sd.ORDERIDENT=o.IDENTINVISIT
+                WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
+                  AND (sd.DBSTATUS IS NULL OR sd.DBSTATUS!=-1) AND sd.QUANTITY > 0
+                  AND (o.DBSTATUS IS NULL OR o.DBSTATUS!=-1) AND o.PAID=1
+                GROUP BY tdt.NAME ORDER BY REVENUE DESC""", (str(date_from), str(date_to)))
+        except: pass
+
+        _pf["shifts_data"] = None
+        try:
+            _pf["shifts_data"] = run_query("""
+                SELECT COUNT(DISTINCT IRESTAURANT) as OPEN_REST,
+                       (SELECT COUNT(*) FROM RESTAURANTS WHERE NAME IS NOT NULL AND STATUS > 0) as TOTAL_REST
+                FROM GLOBALSHIFTS
+                WHERE STARTTIME >= %s AND STARTTIME < DATEADD(DAY,1,%s)""", (str(date_from), str(date_to)))
+        except: pass
+
+        _pf["today_purchases"] = 0
+        try:
+            p_df = sh_stat_query("""SELECT CAST(SUM(PAYSUMNOTAX) AS INT) as S
+                FROM STAT_SH4_SHIFTS_INVOICES WHERE INVOICEDATE >= %s AND INVOICEDATE <= %s""",
+                (str(date_from), str(date_to)))
+            if not p_df.empty and p_df.iloc[0]["S"] is not None:
+                _pf["today_purchases"] = float(p_df.iloc[0]["S"])
+        except: pass
+
+        _pf["p_staff_meals"] = 0
+        try:
+            sm = run_query("""SELECT SUM(p.BASICSUM) as T FROM PAYMENTS p
+                JOIN ORDERS o ON p.VISIT=o.VISIT AND p.MIDSERVER=o.MIDSERVER AND p.ORDERIDENT=o.IDENTINVISIT
+                WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
+                AND (p.DBSTATUS IS NULL OR p.DBSTATUS!=-1) AND p.PAYLINETYPE=3""", (str(date_from), str(date_to)))
+            if not sm.empty and sm.iloc[0]["T"] is not None:
+                _pf["p_staff_meals"] = float(sm.iloc[0]["T"])
+        except: pass
+
+        st.session_state[_pfin_key] = _pf
+
+    _pf = st.session_state[_pfin_key]
+    tax_data = _pf["tax_data"]
+    shifts_data = _pf["shifts_data"]
+    today_purchases = _pf["today_purchases"]
+    p_staff_meals = _pf["p_staff_meals"]
+
+    # Если SQL пуст — пробуем закэшированные данные из SH API (всегда за 30 дней)
+    _purch_cache_key = "sh_purchases_30d"
+    if today_purchases == 0 and _purch_cache_key in st.session_state:
+        _cached_purch = st.session_state[_purch_cache_key]
+        if not _cached_purch.empty and "TOTAL_AMOUNT" in _cached_purch.columns:
+            today_purchases = float(_cached_purch["TOTAL_AMOUNT"].sum())
+
+    # --- Скидки ---
+    p_discounts = safe_sum(ord_period, "DISCOUNTSUM")
+
+    # --- Расчёт P&L ---
+    fixed_costs = load_user_setting(CURRENT_USER["username"], "fixed_costs", {"staff":0,"rent":0,"utilities":0,"marketing":0,"other":0})
+    fixed_monthly = sum(fixed_costs.values())
+    fixed_for_period = fixed_monthly / 30 * period_days
+
+    # Себестоимость: используем данные из Фудкост (расчёт) если загружены, иначе только переменные расходы
+    recipe_sebes = 0
+    if "recipe_costs" in st.session_state and not st.session_state["recipe_costs"].empty:
+        try:
+            rc = st.session_state["recipe_costs"]
+            rk_p = load_rk_dish_prices(date_from, date_to)
+            sh_p = load_sh_goods_prices()
+            if not rk_p.empty and not sh_p.empty:
+                fc_match = match_foodcost(rk_p, sh_p, purchase_prices=rc)
+                if not fc_match.empty and "FOODCOST_PCT" in fc_match.columns:
+                    # С рецептурами
+                    fc_with = fc_match[fc_match["FOODCOST_PCT"].notna() & (fc_match["FOODCOST_PCT"] > 0) & (fc_match["FOODCOST_PCT"] < 300)]
+                    if not fc_with.empty:
+                        recipe_sebes += float((fc_with["COST_PRICE"] * fc_with["TOTAL_QTY"]).sum())
+                    # Без рецептур (по цене SH)
+                    fc_no = fc_match[(fc_match["FOODCOST_PCT"].isna()) | (fc_match["FOODCOST_PCT"] <= 0)]
+                    if not fc_no.empty and "SH_PRICE" in fc_no.columns:
+                        recipe_sebes += float((fc_no["SH_PRICE"].fillna(0) * fc_no["TOTAL_QTY"]).sum())
+        except: pass
+
+    sebestoimost = max(recipe_sebes, today_purchases) + p_staff_meals + p_discounts + voids_sum
+    # Маржа = выручка - себестоимость
+    margin = rev_period - sebestoimost
+    margin_pct = (margin / rev_period * 100) if rev_period > 0 else 0
+
+    # Налоги — вычисляем СУММУ НДС из выручки по ставкам
+    # НДС включён в цену: налог = выручка * ставка / (100 + ставка)
+    def _extract_rate(label):
+        """Извлечь ставку НДС из названия: 'НДС 22%' → 22, 'НДС 0%' → 0, 'Без НДС' → 0."""
+        import re
+        m = re.search(r'(\d+)', str(label))
+        return int(m.group(1)) if m else 0
+
+    tax_sum = 0
+    if not tax_data.empty:
+        tax_data = tax_data.copy()
+        tax_data["RATE"] = tax_data["TAX_LABEL"].apply(_extract_rate)
+        tax_data["TAX_AMOUNT"] = tax_data.apply(
+            lambda r: r["REVENUE"] * r["RATE"] / (100 + r["RATE"]) if r["RATE"] > 0 else 0, axis=1)
+        tax_sum = float(tax_data["TAX_AMOUNT"].sum())
+
+    # Фудкост % (себестоимость / выручка)
+    foodcost_pct = (sebestoimost / rev_period * 100) if rev_period > 0 else 0
+    # Доход = маржа - налоги - постоянные расходы
+    income = margin - tax_sum - fixed_for_period
+    income_daily = income / period_days if period_days > 0 else 0
+
+    # Открытые смены
+    open_rest = 0; total_rest_shifts = 0
+    if shifts_data is not None and not shifts_data.empty:
+        open_rest = int(shifts_data.iloc[0]["OPEN_REST"] or 0)
+        total_rest_shifts = int(shifts_data.iloc[0]["TOTAL_REST"] or 0)
+
+    # --- Главная линейка P&L ---
+    st.markdown("##### P&L")
+    p1, p2, p3, p4 = st.columns(4)
+    with p1:
+        st.metric("Маржа", f"{margin:,.0f} ₽", delta=f"{margin_pct:.1f}% от выручки")
+    with p2:
+        st.metric("Налоги (НДС)", f"{tax_sum:,.0f} ₽",
+                   delta=f"{tax_sum/rev_period*100:.1f}% от выручки" if rev_period > 0 else "")
+    with p3:
+        st.metric("Себестоимость", f"{sebestoimost:,.0f} ₽",
+                   delta=f"фудкост {foodcost_pct:.1f}%")
+    with p4:
+        st.metric("Доход", f"{income:,.0f} ₽",
+                   delta=f"{income_daily:,.0f} ₽/день")
+
+    # Детализация налогов
+    if not tax_data.empty:
+        tax_items = []
+        for _, row in tax_data.iterrows():
+            rate = row.get("RATE", 0)
+            tax_amt = row.get("TAX_AMOUNT", 0)
+            rev = row["REVENUE"]
+            if tax_amt > 0:
+                tax_items.append(f"{row['TAX_LABEL']}: {tax_amt:,.0f} ₽ (с выручки {rev:,.0f} ₽)")
+            else:
+                tax_items.append(f"{row['TAX_LABEL']}: 0 ₽ (выр. {rev:,.0f} ₽)")
+        st.caption("НДС: " + " · ".join(tax_items))
+
+    # --- Детали расходов ---
+    st.markdown("##### Детали")
+    d1, d2, d3, d4, d5 = st.columns(5)
+    _purch_from_api = _purch_cache_key in st.session_state
+    with d1:
+        if today_purchases > 0:
+            _purch_label = "Закупки (API)" if _purch_from_api else "Закупки (SH)"
+            st.metric(_purch_label, f"{today_purchases:,.0f} ₽",
+                       delta=f"{today_purchases/rev_period*100:.1f}% от выручки" if rev_period > 0 else "")
+        else:
+            st.metric("Закупки (SH)", "нет данных")
+            if st.button("📥 Загрузить за 30 дней", key="load_purchases_btn", use_container_width=True):
+                _pp_progress = st.container()
+                _pp_d1 = (datetime.now().date() - timedelta(30)).isoformat()
+                _pp_d2 = datetime.now().date().isoformat()
+                with _pp_progress:
+                    with st.spinner("Загружаю накладные за 30 дней из SH API..."):
+                        _pp_data, _pp_err = sh_load_purchase_prices(
+                            _pp_d1, _pp_d2,
+                            progress_container=_pp_progress, max_rids=50)
+                        if _pp_err:
+                            st.warning(f"{_pp_err}")
+                        elif not _pp_data.empty:
+                            st.session_state[_purch_cache_key] = _pp_data
+                            st.rerun()
+                        else:
+                            st.info("Нет накладных за последние 30 дней")
+    with d2:
+        st.metric("Скидки", f"{p_discounts:,.0f} ₽",
+                   delta=f"{p_discounts/rev_period*100:.1f}% от выручки" if rev_period > 0 else "")
+    with d3:
+        st.metric("Питание сотр.", f"{p_staff_meals:,.0f} ₽",
+                   delta=f"{p_staff_meals/rev_period*100:.1f}% от выручки" if rev_period > 0 else "")
+    with d4:
+        st.metric("Отказы", f"{voids_count:,} шт",
+                   delta=f"{voids_sum:,.0f} ₽")
+    with d5:
+        st.metric("Смены открыты", f"{open_rest}/{total_rest_shifts}" if total_rest_shifts > 0 else "—")
+
+    if fixed_monthly == 0:
+        st.caption("Для точного расчёта дохода заполните постоянные расходы в Личном кабинете →")
+    if recipe_sebes > 0:
+        st.caption(f"Себестоимость из рецептур: {recipe_sebes:,.0f} ₽ (загружено из Фудкост расчёт)")
+    elif recipe_sebes == 0 and today_purchases == 0:
+        st.caption("Для расчёта себестоимости откройте «Фудкост (расчёт)» и загрузите данные из рецептур →")
+    elif _purch_from_api:
+        _n_items = len(st.session_state[_purch_cache_key])
+        st.caption(f"Закупки из SH API (за 30 дней): {_n_items} товаров · Пост. расходы: {fixed_for_period:,.0f} ₽ за период")
+    else:
+        st.caption(f"Пост. расходы: {fixed_for_period:,.0f} ₽ за период ({fixed_monthly:,.0f} ₽/мес)")
 
     # ============================================================
     # ROW 2: Revenue TODAY vs YESTERDAY + Top Restaurants
@@ -4108,6 +4570,31 @@ if page == "Выручка":
         with c4: st.metric("Ср. чек",f"{avg_c:,.0f} ₽")
         with c5: st.metric("Гостей",f"{guests:,}")
         with c6: st.metric("Блюд",f"{dishes_n:,}")
+
+        # --- Налоги (НДС) плашка ---
+        _tax_vyr = load_tax_breakdown(date_from, date_to)
+        if not _tax_vyr.empty and "REVENUE" in _tax_vyr.columns:
+            import re as _re
+            _tax_total = 0
+            _tax_parts = []
+            for _, _tr in _tax_vyr.iterrows():
+                _label = str(_tr.get("TAX_NAME", _tr.get("TAX_LABEL", "")))
+                _rev_t = float(_tr["REVENUE"])
+                _m = _re.search(r'(\d+)', _label)
+                _rate = int(_m.group(1)) if _m else 0
+                _amt = _rev_t * _rate / (100 + _rate) if _rate > 0 else 0
+                _tax_total += _amt
+                _tax_parts.append(f"{_label}: {_amt:,.0f} ₽")
+            if _tax_total > 0:
+                _tax_pct = _tax_total / rev * 100 if rev > 0 else 0
+                _tax_color = "#00ff6a" if not IS_LIGHT else "#00b847"
+                st.markdown(f"""<div style="display:inline-flex;align-items:center;gap:12px;padding:6px 16px;
+                    background:var(--card);border:1px solid var(--border);border-radius:10px;margin-top:4px;">
+                    <span style="font-size:.78rem;font-weight:600;color:{_tax_color};">НДС: {_tax_total:,.0f} ₽</span>
+                    <span style="font-size:.72rem;color:var(--t3);">({_tax_pct:.1f}% от выручки)</span>
+                    <span style="font-size:.68rem;color:var(--t3);">{'  ·  '.join(_tax_parts)}</span>
+                </div>""", unsafe_allow_html=True)
+
         st.divider()
         cl,cr = st.columns([2,1])
         with cl:
@@ -4174,7 +4661,7 @@ if page == "Выручка":
                     </div>""", unsafe_allow_html=True)
 
         # --- Питание сотрудников ---
-        staff_meals = run_query("""
+        staff_meals = run_query_cached("""
             SELECT COUNT(*) as CNT, SUM(p.BASICSUM) as TOTAL
             FROM PAYMENTS p
             JOIN ORDERS o ON p.VISIT=o.VISIT AND p.MIDSERVER=o.MIDSERVER AND p.ORDERIDENT=o.IDENTINVISIT
@@ -4195,7 +4682,7 @@ if page == "Выручка":
 
             # Детализация по сотрудникам и столовым
             with st.expander("Подробнее", expanded=False):
-                staff_detail = run_query("""
+                staff_detail = run_query_cached("""
                     SELECT c.NAME as EMPLOYEE, r.NAME as RESTAURANT,
                         COUNT(*) as MEALS, CAST(SUM(p.BASICSUM) AS INT) as TOTAL_SUM,
                         CAST(AVG(p.BASICSUM) AS INT) as AVG_CHECK,
@@ -4293,7 +4780,7 @@ if page == "Выручка":
         dow_names_ru = ["Понедельник","Вторник","Среда","Четверг","Пятница","Суббота","Воскресенье"]
 
         # Load same-day-of-week for last 8 weeks
-        forecast_data = run_query("""
+        forecast_data = run_query_cached("""
             SELECT CAST(o.OPENTIME AS DATE) as DAY,
                 COUNT(*) as ORDERS, SUM(o.TOPAYSUM) as REVENUE,
                 AVG(o.TOPAYSUM) as AVG_CHECK, SUM(o.GUESTSCOUNT) as GUESTS
@@ -4306,7 +4793,7 @@ if page == "Выручка":
 
         # Fallback for SQLite (demo mode)
         if forecast_data.empty:
-            forecast_data = run_query("""
+            forecast_data = run_query_cached("""
                 SELECT SUBSTR(OPENTIME,1,10) as DAY,
                     COUNT(*) as ORDERS, SUM(TOPAYSUM) as REVENUE,
                     AVG(TOPAYSUM) as AVG_CHECK, SUM(GUESTSCOUNT) as GUESTS
@@ -6118,6 +6605,53 @@ if page == "Склад":
             with c3: st.metric("Стоимость", f"{total_amount:,.0f} ₽")
             with c4: st.metric("Позиций", f"{n_items:,}")
 
+            # --- Динамика остатков ---
+            _dyn_d1 = date_from
+            _dyn_d2 = date_to
+            # Минимум 7 дней для графика
+            if (date_to - date_from).days < 7:
+                _dyn_d1 = date_to - timedelta(6)
+            _dyn_key = f"_stock_dyn_{_dyn_d1}_{_dyn_d2}"
+            if _dyn_key not in st.session_state:
+                with st.spinner(f"Загружаю динамику остатков ({_dyn_d1} — {_dyn_d2})..."):
+                    st.session_state[_dyn_key] = sh_load_stock_dynamics(str(_dyn_d1), str(_dyn_d2))
+            _dyn_df = st.session_state[_dyn_key]
+
+            if not _dyn_df.empty and "DATE" in _dyn_df.columns and "AMOUNT" in _dyn_df.columns:
+                _all_deps = sorted(_dyn_df["DEPART"].unique().tolist()) if "DEPART" in _dyn_df.columns else []
+                _sel_deps = st.multiselect("Фильтр по складам:", _all_deps, default=[], key="stock_dyn_filter",
+                                            placeholder="Все склады")
+                _filtered = _dyn_df[_dyn_df["DEPART"].isin(_sel_deps)] if _sel_deps else _dyn_df
+
+                # Агрегируем по дате (и по складу если фильтр)
+                if _sel_deps and len(_sel_deps) <= 5:
+                    # Раздельные линии по складам
+                    _plot = _filtered.copy()
+                    _plot["DATE"] = pd.to_datetime(_plot["DATE"])
+                    fig_dyn = px.line(_plot, x="DATE", y="AMOUNT", color="DEPART",
+                        labels={"DATE": "Дата", "AMOUNT": "Стоимость, ₽", "DEPART": "Склад"},
+                        markers=True)
+                else:
+                    # Суммарная линия
+                    _by_date = _filtered.groupby("DATE")["AMOUNT"].sum().reset_index()
+                    _by_date["DATE"] = pd.to_datetime(_by_date["DATE"])
+                    _by_date = _by_date.sort_values("DATE")
+                    accent = "#00ff6a" if not IS_LIGHT else "#00b847"
+                    fig_dyn = go.Figure()
+                    fig_dyn.add_trace(go.Scatter(x=_by_date["DATE"], y=_by_date["AMOUNT"],
+                        mode="lines+markers", fill="tozeroy",
+                        line=dict(color=accent, width=2.5),
+                        marker=dict(size=6, color=accent),
+                        text=_by_date["AMOUNT"].apply(lambda x: f"{x:,.0f} ₽"),
+                        hovertemplate="%{x|%d.%m} — %{text}<extra></extra>"))
+                fig_dyn.update_layout(
+                    height=320, yaxis_title="₽", xaxis_title="",
+                    margin=dict(l=60, r=20, t=30, b=30),
+                    **CHART_THEME)
+                fix_bar_hover(fig_dyn)
+                st.plotly_chart(fig_dyn, use_container_width=True, config={"displayModeBar": False})
+                st.caption(f"Динамика за {_dyn_d1} — {_dyn_d2} ({(_dyn_d2 - _dyn_d1).days + 1} дн.)")
+
             st.divider()
 
             # Переключатель отчётов
@@ -6941,7 +7475,7 @@ if page == "Фудкост":
     st.caption(f"Источник: STAT_SH4_SHIFTS_SELLING (экспорт StoreHouse → SQL)")
 
     # Загрузка данных с названиями
-    selling = run_query("""
+    selling = run_query_cached("""
         SELECT CAST(s.SELLINGDATE AS DATE) as SELL_DATE,
             s.GOODRID, s.GROUPRID, s.RKSIFR,
             mi.NAME as DISH_NAME,
@@ -6954,7 +7488,7 @@ if page == "Фудкост":
         GROUP BY CAST(s.SELLINGDATE AS DATE), s.GOODRID, s.GROUPRID, s.RKSIFR, mi.NAME""",
         (str(date_from), str(date_to)))
     # Справочник точек продажи
-    _locs = run_query("SELECT RID, NAME FROM STAT_SH4_SALELOCATIONS WHERE NAME IS NOT NULL")
+    _locs = run_query_cached("SELECT RID, NAME FROM STAT_SH4_SALELOCATIONS WHERE NAME IS NOT NULL")
     _loc_map = dict(zip(_locs["RID"], _locs["NAME"])) if not _locs.empty else {}
     if not selling.empty:
         selling["DISH_NAME"] = selling["DISH_NAME"].fillna("Товар #" + selling["GOODRID"].astype(str))
@@ -7027,7 +7561,7 @@ if page == "Фудкост":
             ).reset_index().sort_values("SELLING", ascending=False)
             by_group["FC_PCT"] = (by_group["PURCHASE"] / by_group["SELLING"].replace(0, 1) * 100).round(1)
             # Справочник товарных групп
-            _gg = run_query("SELECT RID, NAME FROM STAT_SH4_SHIFTS_GOODGROUPS WHERE NAME IS NOT NULL")
+            _gg = run_query_cached("SELECT RID, NAME FROM STAT_SH4_SHIFTS_GOODGROUPS WHERE NAME IS NOT NULL")
             _gg_map = dict(zip(_gg["RID"], _gg["NAME"])) if not _gg.empty else {}
             # Названия: SALELOCATIONS (0-39) или GOODGROUPS
             def _resolve_group(rid):
@@ -7227,6 +7761,15 @@ if page == "Фудкост (расчёт)":
             del st.session_state[rc_err_key]
             st.rerun()
 
+    # ---- Статус данных ----
+    _fc_purch_key_check = "sh_purchases_30d"
+    _has_api_pp = _fc_purch_key_check in st.session_state and not st.session_state[_fc_purch_key_check].empty
+    if _has_api_pp:
+        _n_api = len(st.session_state[_fc_purch_key_check])
+        st.caption(f"📥 Закупочные цены из накладных SH (за 30 дней): {_n_api} товаров")
+    elif recipe_costs.empty:
+        st.caption("💡 Загрузите накладные кнопкой «📥 Загрузить из SH» на Пульсе для расчёта по закупочным ценам")
+
     # ---- Метрики ----
     c1, c2, c3, c4 = st.columns(4)
     with c1: st.metric("Товаров SH", f"{len(sh_prices):,}" if not sh_prices.empty else "0")
@@ -7245,7 +7788,24 @@ if page == "Фудкост (расчёт)":
         st.warning("Нет блюд с продажами за выбранный период")
     else:
         # Сопоставление: recipe_costs (себестоимость) + sh_prices + rk_prices
+        # Если есть закупочные цены из API (загружены на Пульсе) — дополняем рецептуры
         rc_arg = recipe_costs if not recipe_costs.empty else None
+        _fc_purch_key = "sh_purchases_30d"
+        if _fc_purch_key in st.session_state and not st.session_state[_fc_purch_key].empty:
+            api_pp = st.session_state[_fc_purch_key]
+            if rc_arg is not None:
+                # Merge: recipe costs + API purchase prices for items NOT in recipes
+                _rc_names = set(rc_arg["DISH_NAME"].str.strip().str.lower())
+                _api_as_rc = api_pp[["PRODUCT_NAME", "AVG_PURCHASE_PRICE"]].rename(
+                    columns={"PRODUCT_NAME": "DISH_NAME", "AVG_PURCHASE_PRICE": "COST_PER_PORTION"})
+                _api_new = _api_as_rc[~_api_as_rc["DISH_NAME"].str.strip().str.lower().isin(_rc_names)]
+                if not _api_new.empty:
+                    rc_arg = pd.concat([rc_arg, _api_new], ignore_index=True)
+            else:
+                # No recipes — use API purchase prices as cost source
+                rc_arg = api_pp[["PRODUCT_NAME", "AVG_PURCHASE_PRICE"]].rename(
+                    columns={"PRODUCT_NAME": "DISH_NAME", "AVG_PURCHASE_PRICE": "COST_PER_PORTION"})
+
         with st.spinner("Сопоставляю названия и рассчитываю фудкост..."):
             fc = match_foodcost(rk_prices, sh_prices, purchase_prices=rc_arg)
 
@@ -7286,23 +7846,72 @@ if page == "Фудкост (расчёт)":
                     total_margin = total_revenue - total_cost
                     avg_foodcost = (total_cost / total_revenue * 100) if total_revenue > 0 else 0
 
+                    # ---- ПОЛНЫЕ ДАННЫЕ ----
+                    full_orders = load_orders(date_from, date_to)
+                    full_revenue = float(full_orders["TOPAYSUM"].sum()) if not full_orders.empty else 0
+
+                    # Товары БЕЗ рецептур: всё что продано но НЕ покрыто рецептурами
+                    # Их себестоимость = цена из SH (закупочная)
+                    fc_no_recipe = fc[(fc["FOODCOST_PCT"].isna()) | (fc["FOODCOST_PCT"] <= 0)].copy()
+                    no_recipe_revenue = float(fc_no_recipe["TOTAL_SUM"].sum()) if not fc_no_recipe.empty else 0
+                    no_recipe_cost = 0
+                    if not fc_no_recipe.empty and "SH_PRICE" in fc_no_recipe.columns:
+                        fc_no_recipe["_COST"] = fc_no_recipe["SH_PRICE"].fillna(0) * fc_no_recipe["TOTAL_QTY"]
+                        no_recipe_cost = float(fc_no_recipe["_COST"].sum())
+
+                    # Непокрытая выручка (не сопоставлена ни с чем)
+                    uncovered_revenue = max(0, full_revenue - total_revenue - no_recipe_revenue)
+
+                    # ИТОГО
+                    total_all_revenue = full_revenue
+                    total_all_cost = total_cost + no_recipe_cost
+                    total_all_margin = total_all_revenue - total_all_cost
+                    total_all_fc = (total_all_cost / total_all_revenue * 100) if total_all_revenue > 0 else 0
+
                     st.markdown(f"### Сводка за период: {date_from} — {date_to}")
-                    c1, c2, c3, c4 = st.columns(4)
-                    with c1:
-                        st.metric("💵 Выручка", f"{total_revenue:,.0f} ₽")
-                    with c2:
-                        st.metric("Себестоимость", f"{total_cost:,.0f} ₽")
-                    with c3:
-                        st.metric("Маржа", f"{total_margin:,.0f} ₽",
+
+                    # --- РЯД 1: Товары С рецептурами ---
+                    st.caption("📋 Товары с рецептурами (акты нарезки)")
+                    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+                    with r1c1: st.metric("Выручка", f"{total_revenue:,.0f} ₽")
+                    with r1c2: st.metric("Себестоимость", f"{total_cost:,.0f} ₽")
+                    with r1c3: st.metric("Маржа", f"{total_margin:,.0f} ₽",
                                   delta=f"{total_margin/max(1,total_revenue)*100:.1f}% от выручки")
-                    with c4:
+                    with r1c4:
                         fc_color = "normal" if 25 <= avg_foodcost <= 35 else "inverse"
-                        st.metric("Средний фудкост", f"{avg_foodcost:.1f}%",
-                                  delta="норма" if 25 <= avg_foodcost <= 35 else ("выше нормы" if avg_foodcost > 35 else "ниже нормы"),
+                        st.metric("Фудкост", f"{avg_foodcost:.1f}%",
+                                  delta="норма" if 25 <= avg_foodcost <= 35 else ("выше" if avg_foodcost > 35 else "ниже"),
                                   delta_color=fc_color)
 
+                    # --- РЯД 2: Товары БЕЗ рецептур (цена из SH) ---
+                    if no_recipe_revenue > 0 or uncovered_revenue > 0:
+                        st.divider()
+                        st.caption("📦 Товары без рецептур (по закупочной цене SH)")
+                        no_recipe_margin = no_recipe_revenue - no_recipe_cost
+                        no_recipe_fc = (no_recipe_cost / no_recipe_revenue * 100) if no_recipe_revenue > 0 else 0
+                        r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+                        with r2c1: st.metric("Выручка", f"{no_recipe_revenue:,.0f} ₽")
+                        with r2c2: st.metric("Себестоимость", f"{no_recipe_cost:,.0f} ₽",
+                                      delta="из цен SH" if no_recipe_cost > 0 else "нет данных")
+                        with r2c3: st.metric("Маржа", f"{no_recipe_margin:,.0f} ₽")
+                        with r2c4: st.metric("Фудкост", f"{no_recipe_fc:.1f}%" if no_recipe_cost > 0 else "—")
+
+                    # --- РЯД 3: ИТОГО ---
+                    st.divider()
+                    st.markdown("##### Итого по всем товарам")
+                    r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+                    with r3c1: st.metric("Общая выручка", f"{total_all_revenue:,.0f} ₽")
+                    with r3c2: st.metric("Общая себестоимость", f"{total_all_cost:,.0f} ₽")
+                    with r3c3: st.metric("Общая маржа", f"{total_all_margin:,.0f} ₽",
+                                  delta=f"{total_all_margin/max(1,total_all_revenue)*100:.1f}%")
+                    with r3c4:
+                        st.metric("Общий фудкост", f"{total_all_fc:.1f}%",
+                                  delta=f"покрыто {(total_revenue+no_recipe_revenue)/max(1,full_revenue)*100:.0f}% выручки")
+
+                    if uncovered_revenue > 0:
+                        st.caption(f"Не сопоставлено: {uncovered_revenue:,.0f} ₽ ({uncovered_revenue/max(1,full_revenue)*100:.1f}% выручки) — нет в SH")
+
                     # Покрытие выручки рецептурами
-                    full_revenue = float(load_orders(date_from, date_to)["TOPAYSUM"].sum()) if not load_orders(date_from, date_to).empty else 0
                     if full_revenue > 0:
                         coverage_pct = total_revenue / full_revenue * 100
                         uncovered = full_revenue - total_revenue
@@ -7884,7 +8493,8 @@ if page == "Доход/Расход":
     st.caption("Введите средние ежемесячные расходы — они используются для расчёта чистого дохода.")
 
     if "_fixed_costs" not in st.session_state:
-        st.session_state["_fixed_costs"] = {"staff": 0, "rent": 0, "utilities": 0, "marketing": 0, "other": 0}
+        saved = load_user_setting(CURRENT_USER["username"], "fixed_costs", None)
+        st.session_state["_fixed_costs"] = saved if saved else {"staff": 0, "rent": 0, "utilities": 0, "marketing": 0, "other": 0}
     fc = st.session_state["_fixed_costs"]
 
     with st.expander("Настройки постоянных расходов", expanded=not any(v > 0 for v in fc.values())):
@@ -7900,6 +8510,8 @@ if page == "Доход/Расход":
         with fc_cols[4]:
             fc["other"] = st.number_input("Прочие ₽/мес", min_value=0, value=fc["other"], step=5000, key="_fc_other", help="Все остальные постоянные расходы")
         st.session_state["_fixed_costs"] = fc
+        # Автосохранение в БД
+        save_user_setting(CURRENT_USER["username"], "fixed_costs", fc)
 
     fixed_monthly = sum(fc.values())
     fixed_daily = fixed_monthly / 30.0
@@ -7924,7 +8536,7 @@ if page == "Доход/Расход":
 
         staff_meals = 0
         try:
-            sm_df = run_query("""SELECT SUM(p.BASICSUM) as TOTAL
+            sm_df = run_query_cached("""SELECT SUM(p.BASICSUM) as TOTAL
                 FROM PAYMENTS p
                 JOIN ORDERS o ON p.VISIT=o.VISIT AND p.MIDSERVER=o.MIDSERVER AND p.ORDERIDENT=o.IDENTINVISIT
                 WHERE o.OPENTIME >= %s AND o.OPENTIME < DATEADD(DAY,1,%s)
@@ -7936,11 +8548,22 @@ if page == "Доход/Расход":
 
         purchases = 0
         try:
-            inv = sh_stat_query("""SELECT SUM(PAYSUMNOTAX) as S FROM STAT_SH4_SHIFTS_INVOICES
-                WHERE INVOICEDATE BETWEEN %s AND %s""", (str(date_from), str(date_to)))
+            _dr_inv_key = f"_qc_dr_inv_{date_from}_{date_to}"
+            if _dr_inv_key not in st.session_state:
+                inv = sh_stat_query("""SELECT SUM(PAYSUMNOTAX) as S FROM STAT_SH4_SHIFTS_INVOICES
+                    WHERE INVOICEDATE BETWEEN %s AND %s""", (str(date_from), str(date_to)))
+                st.session_state[_dr_inv_key] = inv
+            inv = st.session_state[_dr_inv_key]
             if not inv.empty and inv.iloc[0]["S"] is not None:
                 purchases = float(inv.iloc[0]["S"])
         except: pass
+        # Fallback: cached API purchases from Пульс
+        if purchases == 0:
+            _dr_purch_key = "sh_purchases_30d"
+            if _dr_purch_key in st.session_state:
+                _dr_cached = st.session_state[_dr_purch_key]
+                if not _dr_cached.empty and "TOTAL_AMOUNT" in _dr_cached.columns:
+                    purchases = float(_dr_cached["TOTAL_AMOUNT"].sum())
 
         variable_costs = discounts + voids_sum + staff_meals + purchases
         fixed_period = fixed_daily * period_days
@@ -8058,5 +8681,101 @@ if page == "Доход/Расход":
             except: st.markdown(recs)
 
 
+# --- ЛИЧНЫЙ КАБИНЕТ ---
+if page == "Личный кабинет":
+    page_header("Личный кабинет", show_period=False)
+
+    user_login = CURRENT_USER["username"]
+    user_name = CURRENT_USER["name"]
+    user_role = CURRENT_USER["role"]
+
+    # === ПРОФИЛЬ ===
+    st.markdown("### Профиль")
+    p1, p2, p3 = st.columns(3)
+    with p1: st.text_input("Имя", value=user_name, disabled=True, key="_lk_name")
+    with p2: st.text_input("Логин", value=user_login, disabled=True, key="_lk_login")
+    with p3: st.text_input("Роль", value="Администратор" if user_role == "admin" else "Пользователь", disabled=True, key="_lk_role")
+
+    # === СМЕНА ПАРОЛЯ ===
+    st.divider()
+    st.markdown("### Смена пароля")
+    with st.expander("Сменить пароль"):
+        old_pw = st.text_input("Текущий пароль", type="password", key="_lk_old_pw")
+        new_pw = st.text_input("Новый пароль", type="password", key="_lk_new_pw")
+        new_pw2 = st.text_input("Повторите новый пароль", type="password", key="_lk_new_pw2")
+        if st.button("Сохранить пароль", key="_lk_save_pw"):
+            if not old_pw or not new_pw:
+                st.warning("Заполните все поля")
+            elif new_pw != new_pw2:
+                st.error("Пароли не совпадают")
+            elif len(new_pw) < 4:
+                st.error("Пароль слишком короткий (мин. 4 символа)")
+            else:
+                old_hash = hashlib.sha256(old_pw.encode()).hexdigest()
+                # Check old password
+                if user_login not in AUTH_USERS or AUTH_USERS[user_login]["hash"] != old_hash:
+                    st.error("Неверный текущий пароль")
+                else:
+                    new_hash = hashlib.sha256(new_pw.encode()).hexdigest()
+                    save_user_setting(user_login, "password_hash", new_hash)
+                    st.success("Пароль сохранён!")
+                    st.info("В текущей версии пароли хранятся в коде. Сохранение нового пароля будет работать после интеграции с БД.")
+
+    # === ПОСТОЯННЫЕ РАСХОДЫ ===
+    st.divider()
+    st.markdown("### Постоянные расходы")
+    st.caption("Эти значения используются на странице «Доход/Расход» для расчёта чистого дохода.")
+
+    saved_fc = load_user_setting(user_login, "fixed_costs", {"staff": 0, "rent": 0, "utilities": 0, "marketing": 0, "other": 0})
+
+    fc_cols = st.columns(5)
+    with fc_cols[0]:
+        saved_fc["staff"] = st.number_input("Персонал ₽/мес", min_value=0, value=saved_fc.get("staff", 0), step=10000, key="_lk_fc_staff")
+    with fc_cols[1]:
+        saved_fc["rent"] = st.number_input("Аренда ₽/мес", min_value=0, value=saved_fc.get("rent", 0), step=10000, key="_lk_fc_rent")
+    with fc_cols[2]:
+        saved_fc["utilities"] = st.number_input("Комм.услуги ₽/мес", min_value=0, value=saved_fc.get("utilities", 0), step=5000, key="_lk_fc_util")
+    with fc_cols[3]:
+        saved_fc["marketing"] = st.number_input("Маркетинг ₽/мес", min_value=0, value=saved_fc.get("marketing", 0), step=5000, key="_lk_fc_mkt")
+    with fc_cols[4]:
+        saved_fc["other"] = st.number_input("Прочие ₽/мес", min_value=0, value=saved_fc.get("other", 0), step=5000, key="_lk_fc_other")
+
+    total_fc = sum(saved_fc.values())
+    st.metric("Итого постоянных расходов", f"{total_fc:,.0f} ₽/мес", delta=f"{total_fc/30:,.0f} ₽/день")
+
+    if st.button("Сохранить расходы", key="_lk_save_fc", use_container_width=True):
+        save_user_setting(user_login, "fixed_costs", saved_fc)
+        st.session_state["_fixed_costs"] = saved_fc
+        st.success("Расходы сохранены!")
+
+    # === НАСТРОЙКИ ИНТЕРФЕЙСА ===
+    st.divider()
+    st.markdown("### Настройки интерфейса")
+
+    ui_prefs = load_user_setting(user_login, "ui_prefs", {"default_period": "7 дней", "default_page": "Пульс"})
+
+    uc1, uc2 = st.columns(2)
+    with uc1:
+        periods = ["Сегодня", "Вчера", "7 дней", "30 дней", "90 дней"]
+        idx = periods.index(ui_prefs.get("default_period", "7 дней")) if ui_prefs.get("default_period", "7 дней") in periods else 2
+        ui_prefs["default_period"] = st.selectbox("Период по умолчанию", periods, index=idx, key="_lk_def_period")
+    with uc2:
+        ui_prefs["default_page"] = st.selectbox("Стартовая страница", PAGES, index=0, key="_lk_def_page")
+
+    if st.button("Сохранить настройки", key="_lk_save_ui", use_container_width=True):
+        save_user_setting(user_login, "ui_prefs", ui_prefs)
+        st.success("Настройки сохранены!")
+
+    # === ВСЕ НАСТРОЙКИ (DEBUG) ===
+    if user_role == "admin":
+        st.divider()
+        st.markdown("### Все сохранённые настройки")
+        all_settings = load_all_user_settings(user_login)
+        if all_settings:
+            for k, v in all_settings.items():
+                st.json({k: v})
+        else:
+            st.info("Нет сохранённых настроек")
+
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v8.5")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.8")

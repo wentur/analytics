@@ -253,7 +253,7 @@ def show_login_page():
                         st.error("Неверный логин или пароль")
 
         st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
-            v9.16
+            v9.17
         </div>""", unsafe_allow_html=True)
 
 
@@ -3874,7 +3874,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v9.16")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.17")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -8851,9 +8851,10 @@ if page == "Доход/Расход":
         if not daily.empty and "REVENUE" in daily.columns:
             fig_d = go.Figure()
             fig_d.add_trace(go.Bar(x=daily["DAY"], y=daily["REVENUE"], name="Выручка", marker_color=accent))
-            if fixed_daily > 0:
-                fig_d.add_hline(y=fixed_daily, line_dash="dash", line_color=red, opacity=0.6,
-                    annotation_text=f"Пост. расходы: {fixed_daily:,.0f} ₽/день", annotation_position="top left")
+            _fixed_daily_avg = fixed_period / period_days if period_days > 0 else 0
+            if _fixed_daily_avg > 0:
+                fig_d.add_hline(y=_fixed_daily_avg, line_dash="dash", line_color=red, opacity=0.6,
+                    annotation_text=f"Пост. расходы: {_fixed_daily_avg:,.0f} ₽/день", annotation_position="top left")
             fig_d.update_layout(height=280, showlegend=True, legend=dict(orientation="h", y=1.1), margin=dict(l=40,r=20,t=40,b=30), **CHART_THEME)
             fix_bar_hover(fig_d)
             st.plotly_chart(fig_d, use_container_width=True, config={"displayModeBar": False})
@@ -8991,4 +8992,4 @@ if page == "Личный кабинет":
             st.info("Нет сохранённых настроек")
 
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.16")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.17")

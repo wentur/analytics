@@ -253,9 +253,35 @@ def show_login_page():
                         st.error("Неверный логин или пароль")
 
         st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
-            v9.15
+            v9.16
         </div>""", unsafe_allow_html=True)
 
+
+# ============================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================
+import calendar as _cal
+
+def _fixed_cost_for_period(monthly_amount, d_from, d_to):
+    """Рассчитывает постоянные расходы за период с учётом полных/неполных месяцев.
+    Полный месяц = полная сумма, неполный = пропорция дней в этом месяце."""
+    if monthly_amount <= 0:
+        return 0.0
+    total = 0.0
+    cur = d_from.replace(day=1) if hasattr(d_from, 'replace') else d_from
+    while cur <= d_to:
+        y, m = cur.year, cur.month
+        days_in_month = _cal.monthrange(y, m)[1]
+        first = max(d_from, cur.replace(day=1)) if hasattr(d_from, 'replace') else d_from
+        last = min(d_to, cur.replace(day=days_in_month))
+        covered = (last - first).days + 1
+        total += monthly_amount * covered / days_in_month
+        # move to next month
+        if m == 12:
+            cur = cur.replace(year=y+1, month=1, day=1)
+        else:
+            cur = cur.replace(month=m+1, day=1)
+    return total
 
 # ============================================================
 # БД
@@ -3848,7 +3874,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v9.15")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.16")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -4178,7 +4204,7 @@ if page == "Пульс":
     # --- Расчёт P&L ---
     fixed_costs = load_user_setting(CURRENT_USER["username"], "fixed_costs", {"staff":0,"rent":0,"utilities":0,"marketing":0,"other":0})
     fixed_monthly = sum(fixed_costs.values())
-    fixed_for_period = fixed_monthly / 30 * period_days
+    fixed_for_period = _fixed_cost_for_period(fixed_monthly, date_from, date_to)
 
     # Себестоимость: используем данные из Фудкост (расчёт) если загружены, иначе только переменные расходы
     recipe_sebes = 0
@@ -8688,7 +8714,6 @@ if page == "Доход/Расход":
         save_user_setting(CURRENT_USER["username"], "fixed_costs", fc)
 
     fixed_monthly = sum(fc.values())
-    fixed_daily = fixed_monthly / 30.0
     period_days = max((date_to - date_from).days, 1)
 
     st.divider()
@@ -8753,7 +8778,7 @@ if page == "Доход/Расход":
                     if _r > 0:
                         tax_total += float(_tr["REVENUE"]) * _r / (100 + _r)
         except: pass
-        fixed_period = fixed_daily * period_days
+        fixed_period = _fixed_cost_for_period(fixed_monthly, date_from, date_to)
         total_costs = variable_costs + tax_total + fixed_period
         net_profit = revenue - total_costs
         margin_pct = (net_profit / revenue * 100) if revenue > 0 else 0
@@ -8783,11 +8808,11 @@ if page == "Доход/Расход":
             cost_items = []
             if purchases > 0: cost_items.append({"Статья": "Закупки (SH)", "Сумма": purchases})
             if tax_total > 0: cost_items.append({"Статья": "НДС", "Сумма": tax_total})
-            if fc["staff"] > 0: cost_items.append({"Статья": "Персонал", "Сумма": fc["staff"] / 30 * period_days})
-            if fc["rent"] > 0: cost_items.append({"Статья": "Аренда", "Сумма": fc["rent"] / 30 * period_days})
-            if fc["utilities"] > 0: cost_items.append({"Статья": "Комм.услуги", "Сумма": fc["utilities"] / 30 * period_days})
-            if fc["marketing"] > 0: cost_items.append({"Статья": "Маркетинг", "Сумма": fc["marketing"] / 30 * period_days})
-            if fc["other"] > 0: cost_items.append({"Статья": "Прочие", "Сумма": fc["other"] / 30 * period_days})
+            if fc["staff"] > 0: cost_items.append({"Статья": "Персонал", "Сумма": _fixed_cost_for_period(fc["staff"], date_from, date_to)})
+            if fc["rent"] > 0: cost_items.append({"Статья": "Аренда", "Сумма": _fixed_cost_for_period(fc["rent"], date_from, date_to)})
+            if fc["utilities"] > 0: cost_items.append({"Статья": "Комм.услуги", "Сумма": _fixed_cost_for_period(fc["utilities"], date_from, date_to)})
+            if fc["marketing"] > 0: cost_items.append({"Статья": "Маркетинг", "Сумма": _fixed_cost_for_period(fc["marketing"], date_from, date_to)})
+            if fc["other"] > 0: cost_items.append({"Статья": "Прочие", "Сумма": _fixed_cost_for_period(fc["other"], date_from, date_to)})
             if discounts > 0: cost_items.append({"Статья": "Скидки", "Сумма": discounts})
             if staff_meals > 0: cost_items.append({"Статья": "Питание сотр.", "Сумма": staff_meals})
 
@@ -8966,4 +8991,4 @@ if page == "Личный кабинет":
             st.info("Нет сохранённых настроек")
 
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.15")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.16")

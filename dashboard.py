@@ -253,7 +253,7 @@ def show_login_page():
                         st.error("Неверный логин или пароль")
 
         st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
-            v9.17
+            v9.18
         </div>""", unsafe_allow_html=True)
 
 
@@ -3874,7 +3874,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v9.17")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.18")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -4222,8 +4222,8 @@ if page == "Пульс":
                         recipe_sebes += float((fc_with["COST_PRICE"] * fc_with["TOTAL_QTY"]).sum())
                     # Без рецептур (по цене SH)
                     fc_no = fc_match[(fc_match["FOODCOST_PCT"].isna()) | (fc_match["FOODCOST_PCT"] <= 0)]
-                    if not fc_no.empty and "SH_PRICE" in fc_no.columns:
-                        recipe_sebes += float((fc_no["SH_PRICE"].fillna(0) * fc_no["TOTAL_QTY"]).sum())
+                    if not fc_no.empty and "COST_PRICE" in fc_no.columns:
+                        recipe_sebes += float((fc_no["COST_PRICE"].fillna(0) * fc_no["TOTAL_QTY"]).sum())
         except: pass
 
     sebestoimost = max(recipe_sebes, today_purchases) + p_staff_meals + p_discounts
@@ -7964,6 +7964,17 @@ if page == "Фудкост (расчёт)":
     # ---- Статус данных ----
     _fc_purch_key_check = "sh_purchases_30d"
     _has_api_pp = _fc_purch_key_check in st.session_state and not st.session_state[_fc_purch_key_check].empty
+    if not _has_api_pp:
+        # Авто-загрузка закупочных цен из SH API (если не были загружены на Пульсе)
+        with st.spinner("Загружаю закупочные цены из накладных SH..."):
+            _pp_d1 = (datetime.now().date() - timedelta(30)).isoformat()
+            _pp_d2 = datetime.now().date().isoformat()
+            try:
+                _pp_data, _pp_err = sh_load_purchase_prices(_pp_d1, _pp_d2, max_rids=50)
+                if not _pp_err and not _pp_data.empty:
+                    st.session_state[_fc_purch_key_check] = _pp_data
+                    _has_api_pp = True
+            except: pass
     if _has_api_pp:
         _n_api = len(st.session_state[_fc_purch_key_check])
         st.caption(f"📥 Закупочные цены из накладных SH (за 30 дней): {_n_api} товаров")
@@ -8055,8 +8066,8 @@ if page == "Фудкост (расчёт)":
                     fc_no_recipe = fc[(fc["FOODCOST_PCT"].isna()) | (fc["FOODCOST_PCT"] <= 0)].copy()
                     no_recipe_revenue = float(fc_no_recipe["TOTAL_SUM"].sum()) if not fc_no_recipe.empty else 0
                     no_recipe_cost = 0
-                    if not fc_no_recipe.empty and "SH_PRICE" in fc_no_recipe.columns:
-                        fc_no_recipe["_COST"] = fc_no_recipe["SH_PRICE"].fillna(0) * fc_no_recipe["TOTAL_QTY"]
+                    if not fc_no_recipe.empty and "COST_PRICE" in fc_no_recipe.columns:
+                        fc_no_recipe["_COST"] = fc_no_recipe["COST_PRICE"].fillna(0) * fc_no_recipe["TOTAL_QTY"]
                         no_recipe_cost = float(fc_no_recipe["_COST"].sum())
 
                     # Непокрытая выручка (не сопоставлена ни с чем)
@@ -8992,4 +9003,4 @@ if page == "Личный кабинет":
             st.info("Нет сохранённых настроек")
 
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.17")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.18")

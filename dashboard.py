@@ -6,16 +6,16 @@
 # === Auto-setup: config.toml рядом с dashboard.py → .streamlit/config.toml ===
 import os, shutil, pathlib
 
-# Load .env file if exists (supports both ".env" and "env")
+# Load .env file if exists
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_env_candidates = [os.path.join(_script_dir, ".env"), os.path.join(_script_dir, "env")]
-_env_file = next((p for p in _env_candidates if os.path.exists(p)), None)
-if _env_file:
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(_env_file)
-    except ImportError:
-        with open(_env_file) as _ef:
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(_script_dir, ".env"))
+except ImportError:
+    # Manual .env loading if python-dotenv not installed
+    _env_path = os.path.join(_script_dir, ".env")
+    if os.path.exists(_env_path):
+        with open(_env_path) as _ef:
             for _line in _ef:
                 _line = _line.strip()
                 if _line and not _line.startswith("#") and "=" in _line:
@@ -252,7 +252,7 @@ def show_login_page():
                         st.error("Неверный логин или пароль")
 
         st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
-            v9.12
+            v9.11
         </div>""", unsafe_allow_html=True)
 
 
@@ -3844,7 +3844,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v9.12")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.11")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -8962,4 +8962,4 @@ if page == "Личный кабинет":
             st.info("Нет сохранённых настроек")
 
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.12")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.11")

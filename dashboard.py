@@ -253,7 +253,7 @@ def show_login_page():
                         st.error("Неверный логин или пароль")
 
         st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
-            v9.14
+            v9.15
         </div>""", unsafe_allow_html=True)
 
 
@@ -271,6 +271,9 @@ def get_connection():
             timeout=DB_CONFIG["timeout"], charset="UTF-8")
     except Exception as e:
         st.error(f"Ошибка подключения: {e}")
+        _pw = DB_CONFIG["password"]
+        _pw_show = f"{_pw[:3]}***{_pw[-3:]}" if len(_pw) > 6 else "(пусто или короткий)"
+        st.info(f"🔍 Диагностика: server={DB_CONFIG['server']}:{DB_CONFIG['port']}, user={DB_CONFIG['user']}, password={_pw_show}, db={DB_CONFIG['database']}, env_file={'найден: ' + str(_env_file) if _env_file else 'НЕ НАЙДЕН'}")
         return None
 
 def run_query(query, params=None):
@@ -3845,7 +3848,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v9.14")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.15")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -8963,4 +8966,4 @@ if page == "Личный кабинет":
             st.info("Нет сохранённых настроек")
 
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.14")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.15")

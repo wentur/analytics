@@ -253,7 +253,7 @@ def show_login_page():
                         st.error("Неверный логин или пароль")
 
         st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
-            v9.18
+            v9.19
         </div>""", unsafe_allow_html=True)
 
 
@@ -3874,7 +3874,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v9.18")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.19")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -8062,12 +8062,34 @@ if page == "Фудкост (расчёт)":
                     full_revenue = float(full_orders["TOPAYSUM"].sum()) if not full_orders.empty else 0
 
                     # Товары БЕЗ рецептур: всё что продано но НЕ покрыто рецептурами
-                    # Их себестоимость = цена из SH (закупочная)
+                    # Их себестоимость = закупочная цена из накладных SH
                     fc_no_recipe = fc[(fc["FOODCOST_PCT"].isna()) | (fc["FOODCOST_PCT"] <= 0)].copy()
                     no_recipe_revenue = float(fc_no_recipe["TOTAL_SUM"].sum()) if not fc_no_recipe.empty else 0
                     no_recipe_cost = 0
-                    if not fc_no_recipe.empty and "COST_PRICE" in fc_no_recipe.columns:
-                        fc_no_recipe["_COST"] = fc_no_recipe["COST_PRICE"].fillna(0) * fc_no_recipe["TOTAL_QTY"]
+                    if not fc_no_recipe.empty:
+                        # Сначала пробуем COST_PRICE (уже сопоставлена)
+                        if "COST_PRICE" in fc_no_recipe.columns:
+                            fc_no_recipe["_COST"] = fc_no_recipe["COST_PRICE"].fillna(0) * fc_no_recipe["TOTAL_QTY"]
+                        else:
+                            fc_no_recipe["_COST"] = 0.0
+                        # Для товаров, где _COST == 0, пробуем подтянуть из закупочных накладных
+                        _fc_pp_key = "sh_purchases_30d"
+                        if _fc_pp_key in st.session_state and not st.session_state[_fc_pp_key].empty:
+                            _pp = st.session_state[_fc_pp_key]
+                            _pp_dict = dict(zip(_pp["PRODUCT_NAME"].str.strip().str.lower(), _pp["AVG_PURCHASE_PRICE"]))
+                            _zero_mask = fc_no_recipe["_COST"] <= 0
+                            if _zero_mask.any() and "DISH_NAME" in fc_no_recipe.columns:
+                                for idx in fc_no_recipe[_zero_mask].index:
+                                    _dn = str(fc_no_recipe.at[idx, "DISH_NAME"]).strip().lower()
+                                    _pp_price = _pp_dict.get(_dn)
+                                    if _pp_price is None:
+                                        # Частичное совпадение
+                                        for _pn, _pv in _pp_dict.items():
+                                            if _dn in _pn or _pn in _dn or (len(_dn) > 5 and _dn[:12] in _pn):
+                                                _pp_price = _pv
+                                                break
+                                    if _pp_price and _pp_price > 0:
+                                        fc_no_recipe.at[idx, "_COST"] = _pp_price * fc_no_recipe.at[idx, "TOTAL_QTY"]
                         no_recipe_cost = float(fc_no_recipe["_COST"].sum())
 
                     # Непокрытая выручка (не сопоставлена ни с чем)
@@ -9003,4 +9025,4 @@ if page == "Личный кабинет":
             st.info("Нет сохранённых настроек")
 
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.18")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.19")

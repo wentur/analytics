@@ -1,0 +1,5 @@
+.env
+goai_settings.db
+__pycache__/
+*.pyc
+.streamlit/

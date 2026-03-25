@@ -6,21 +6,22 @@
 # === Auto-setup: config.toml рядом с dashboard.py → .streamlit/config.toml ===
 import os, shutil, pathlib
 
-# Load .env file if exists
+# Load .env file if exists (supports both ".env" and "env")
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-try:
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(_script_dir, ".env"))
-except ImportError:
-    # Manual .env loading if python-dotenv not installed
-    _env_path = os.path.join(_script_dir, ".env")
-    if os.path.exists(_env_path):
-        with open(_env_path) as _ef:
+_env_candidates = [os.path.join(_script_dir, ".env"), os.path.join(_script_dir, "env")]
+_env_file = next((p for p in _env_candidates if os.path.exists(p)), None)
+if _env_file:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_file, override=True)
+    except ImportError:
+        with open(_env_file, encoding="utf-8-sig") as _ef:
             for _line in _ef:
                 _line = _line.strip()
                 if _line and not _line.startswith("#") and "=" in _line:
                     _k, _v = _line.split("=", 1)
-                    os.environ.setdefault(_k.strip(), _v.strip())
+                    _v = _v.strip().strip("'\"")
+                    os.environ[_k.strip()] = _v
 _script_dir = pathlib.Path(__file__).parent
 _config_src = _script_dir / "config.toml"
 _config_dst = _script_dir / ".streamlit" / "config.toml"
@@ -50,17 +51,17 @@ DB_CONFIG = {
     "server": os.environ.get("RK7_HOST", "saturn.carbis.ru"),
     "port": os.environ.get("RK7_PORT", "7473"),
     "user": os.environ.get("RK7_USER", "readonly"),
-    "password": os.environ.get("RK7_PASSWORD", ""),
+    "password": os.environ.get("RK7_PASSWORD", "ai3nPG7rwtrJRw"),
     "database": os.environ.get("RK7_DB", "RK7"),
     "login_timeout": 15, "timeout": 60,
 }
 SH_API = {
     "url": os.environ.get("SH_API_URL", "http://saturn.carbis.ru:7477/api"),
     "user": os.environ.get("SH_API_USER", "readonly"),
-    "password": os.environ.get("SH_API_PASSWORD", ""),
+    "password": os.environ.get("SH_API_PASSWORD", "60iNr1uy"),
 }
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAsQX1_48p-h_jR5DJrZ-jiylkalila2Lg")
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
@@ -252,7 +253,7 @@ def show_login_page():
                         st.error("Неверный логин или пароль")
 
         st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
-            v9.11
+            v9.14
         </div>""", unsafe_allow_html=True)
 
 
@@ -3844,7 +3845,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v9.11")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.14")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -8962,4 +8963,4 @@ if page == "Личный кабинет":
             st.info("Нет сохранённых настроек")
 
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.11")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.14")

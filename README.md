@@ -1,48 +1,31 @@
-# goai.rest — Интеллект ресторана v9.11
+# goai.rest — Restaurant Analytics Dashboard v9.41
 
-Аналитический дашборд для сети ресторанов МГУ.
-Подключается к R-Keeper 7 (SQL Server) и StoreHouse API.
-
-## Быстрый старт
+## Quick Start
 
 ```bash
-bash setup.sh
 pip install -r requirements.txt
 streamlit run dashboard.py
 ```
 
-`setup.sh` создаст скрытые файлы (`.env`, `.gitignore`, `.streamlit/config.toml`) из шаблонов.
+## Files
 
-## Файлы
+- `dashboard.py` — main application (~9700 lines)
+- `config.toml` — Streamlit theme config (auto-copied to .streamlit/)
+- `requirements.txt` — Python dependencies
+- `.env` — environment variables (DB credentials, API keys)
 
-| Файл | Описание |
-|------|----------|
-| `dashboard.py` | Основной код (~9000 строк, Streamlit) |
-| `requirements.txt` | Зависимости Python |
-| `setup.sh` | Скрипт первоначальной настройки |
-| `env` | Креденшалы → `setup.sh` создаст `.env` |
-| `env.example` | Шаблон без паролей |
-| `gitignore` | → `setup.sh` создаст `.gitignore` |
-| `config.toml` | Конфиг Streamlit |
-| `streamlit_config.toml` | → `setup.sh` создаст `.streamlit/config.toml` |
-| `demo_data.json.gz` | Демо-данные для режима без БД |
+## Access
 
-## Учётные записи
+- **Admin**: admin / Come3001
+- **User**: alisa / alisasuper
+- **Demo**: demo / demo
 
-- **admin** / Come3001 — полный доступ (ИИ-чат, Проактив)
-- **alisa** / alisasuper — стандартный доступ
-- **demo** / demo — демо-режим (без БД)
+## Features
 
-## Подключения
-
-- **R-Keeper 7**: `saturn.carbis.ru:7473` (SQL Server, база RK7)
-- **StoreHouse API**: `saturn.carbis.ru:7477/api` (REST API)
-- **Gemini AI**: для ИИ-чата и проактивного анализа
-
-## Страницы
-
-Пульс · Выручка · Сезонность · Блюда · Категории · Цены · ABC ·
-Рестораны · Персонал · Смены · Скорость ·
-Касса · Заказы · Проблемы · Удаление блюд ·
-Склад · Накладные · Фудкост · Фудкост (расчёт) · Склад: Схема ·
-Доход/Расход · ИИ-чат · Проактив
+- 23 analytics pages (Pulse, Revenue, Seasonality, Dishes, Categories, Prices, ABC, Restaurants, Staff, Shifts, Speed, Cash, Orders, Issues, Voids, Warehouse, Invoices, Food Cost, Food Cost Calc, Income/Expense, AI Chat, Proactive, Account)
+- Bilingual: Russian / English (toggle in sidebar)
+- Dark / Light theme
+- Mobile responsive
+- R-Keeper 7 + StoreHouse API integration
+- AI-powered chat (Gemini)
+- Revenue forecasting

@@ -1,9 +1,14 @@
+# R-Keeper 7 SQL Server
 RK7_HOST=saturn.carbis.ru
 RK7_PORT=7473
 RK7_USER=readonly
 RK7_PASSWORD=ai3nPG7rwtrJRw
 RK7_DB=RK7
+
+# StoreHouse API
 SH_API_URL=http://saturn.carbis.ru:7477/api
 SH_API_USER=readonly
 SH_API_PASSWORD=60iNr1uy
+
+# Gemini API (for AI chat)
 GEMINI_API_KEY=AIzaSyAsQX1_48p-h_jR5DJrZ-jiylkalila2Lg

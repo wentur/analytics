@@ -112,6 +112,33 @@ def _verify_user(username: str, password: str) -> dict | None:
         return {"username": username.strip().lower(), "role": user["role"], "name": user["name"]}
     return None
 
+# --- Telegram: уведомление о входе ---
+_TG_LOGIN_TOKEN = os.environ.get("TG_LOGIN_BOT_TOKEN", "")
+_TG_LOGIN_CHAT  = os.environ.get("TG_LOGIN_CHAT_ID", os.environ.get("TG_CHAT_ID", ""))
+
+def _notify_login(user: dict, method: str = "password"):
+    """Отправить в Telegram уведомление о входе пользователя."""
+    token = _TG_LOGIN_TOKEN
+    chat  = _TG_LOGIN_CHAT
+    if not token or not chat:
+        return
+    now = datetime.now().strftime("%H:%M, %d.%m.%Y")
+    via = "🔑 пароль" if method == "password" else "🔗 токен (закладка)"
+    text = (
+        f"🔑 *Вход в goai.rest*\n"
+        f"👤 {user.get('name', '?')} ({user.get('username', '?')})\n"
+        f"🕐 {now}\n"
+        f"📲 {via}"
+    )
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat, "text": text, "parse_mode": "Markdown"},
+            timeout=5,
+        )
+    except Exception:
+        pass  # не блокируем вход при ошибке Telegram
+
 def check_auth() -> dict | None:
     """Главная точка входа авторизации.
     1. Сессия (уже залогинен)
@@ -127,6 +154,7 @@ def check_auth() -> dict | None:
     if token and token in _TOKEN_MAP:
         user = _TOKEN_MAP[token]
         st.session_state["_auth_user"] = user
+        _notify_login(user, method="token")
         return user
 
     return None
@@ -637,12 +665,13 @@ def show_login_page():
                     user = _verify_user(username, password)
                     if user:
                         st.session_state["_auth_user"] = user
+                        _notify_login(user, method="password")
                         st.rerun()
                     else:
                         st.error(t("login_error_wrong"))
 
         st.markdown("""<div style="text-align:center; margin-top:16px; color:#444; font-size:.6rem; letter-spacing:.05em;">
-            v9.60
+            v9.67
         </div>""", unsafe_allow_html=True)
 
 
@@ -4725,7 +4754,7 @@ with st.sidebar:
 
     page = st.session_state["_page"]
     st.divider()
-    st.caption(f"{len(load_restaurants())} точек · SH · v9.60")
+    st.caption(f"{len(load_restaurants())} точек · SH · v9.67")
 
 if IS_LIGHT:
     CHART_THEME = dict(
@@ -10028,4 +10057,4 @@ if page == "Личный кабинет":
             st.info("No saved settings" if _get_lang()=="en" else "Нет сохранённых настроек")
 
 st.divider()
-st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.60")
+st.caption(f"{date_from} — {date_to} | {datetime.now().strftime('%H:%M:%S')} | {len(load_restaurants())} точек | v9.67")

@@ -12,3 +12,12 @@ SH_API_PASSWORD=60iNr1uy
 
 # Gemini API (for AI chat)
 GEMINI_API_KEY=AIzaSyAsQX1_48p-h_jR5DJrZ-jiylkalila2Lg
+
+# Telegram bot (shift_notifier.py)
+TG_BOT_TOKEN=8692270690:AAFPh-nw-d-zv8Nz6SN0iJXgim3MQ1HPkLk
+TG_CHAT_ID=130155010
+POLL_MINUTES=10
+
+# Telegram bot (login notifications)
+TG_LOGIN_BOT_TOKEN=8620671034:AAG7-1tFi8nE9KGhLZw1vRLFrHMVTRPd5oM
+TG_LOGIN_CHAT_ID=130155010

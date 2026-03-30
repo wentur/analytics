@@ -1536,11 +1536,27 @@ div[data-testid="stHorizontalBlock"]:has([data-testid="stSelectbox"]) {
         padding-top: 50px !important;
     }
 
-    /* Sidebar as mobile overlay */
+    /* Sidebar as mobile overlay — fully controlled by CSS, no Streamlit animations */
     section[data-testid="stSidebar"] {
         z-index: 999998 !important;
         min-width: 280px !important; max-width: 85vw !important;
         box-shadow: 4px 0 30px rgba(0,0,0,.6);
+        left: 0 !important; top: 0 !important; bottom: 0 !important;
+        margin-left: 0 !important;
+        transform: translateX(-110%) !important;
+        visibility: hidden !important;
+        transition: none !important;
+        animation: none !important;
+    }
+    section[data-testid="stSidebar"][data-goai-open="true"] {
+        transform: translateX(0) !important;
+        visibility: visible !important;
+    }
+    /* Kill Streamlit native collapse/expand buttons on mobile — we use hamburger */
+    [data-testid="stSidebarCollapseButton"],
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="stSidebarCollapsedControl"] {
+        display: none !important;
     }
 
     /* Container — compact padding, room for hamburger top-left */
@@ -1988,16 +2004,16 @@ _components.html("""<script>
     fixPeriodSelector();
     new MutationObserver(fixPeriodSelector).observe(pdoc.body, {childList:true, subtree:true});
 
+    // --- Mobile sidebar: fully controlled by data-goai-open, no Streamlit buttons ---
+    function openSidebar() {
+        const sb = pdoc.querySelector('section[data-testid="stSidebar"]');
+        if (sb) sb.setAttribute('data-goai-open', 'true');
+        const h = pdoc.getElementById('_mob_hamburger');
+        if (h) h.style.display = 'none';
+    }
     function closeSidebar() {
-        const collapseBtn = pdoc.querySelector('[data-testid="stSidebarCollapseButton"] button');
-        if (collapseBtn) { collapseBtn.click(); syncHamburger(); return; }
-        const altBtn = pdoc.querySelector('[data-testid="stSidebarCollapsedControl"] button, [data-testid="collapsedControl"] button');
-        if (altBtn) { altBtn.click(); syncHamburger(); return; }
-        const sidebar = pdoc.querySelector('section[data-testid="stSidebar"]');
-        if (sidebar) {
-            sidebar.setAttribute('aria-expanded', 'false');
-            sidebar.style.setProperty('margin-left', '-100%', 'important');
-        }
+        const sb = pdoc.querySelector('section[data-testid="stSidebar"]');
+        if (sb) sb.removeAttribute('data-goai-open');
         syncHamburger();
     }
 
@@ -2016,15 +2032,16 @@ _components.html("""<script>
             'box-shadow:0 2px 12px rgba(0,0,0,.3);backdrop-filter:blur(8px);';
         h.addEventListener('click', function(e){
             e.stopPropagation();
-            const eb = pdoc.querySelector('[data-testid="stExpandSidebarButton"] button, [data-testid="stExpandSidebarButton"]');
-            if (eb) { eb.click(); }
+            e.preventDefault();
+            openSidebar();
+        });
+        // Close sidebar on tap outside (on the backdrop)
+        pdoc.addEventListener('click', function(e) {
             const sb = pdoc.querySelector('section[data-testid="stSidebar"]');
-            if (sb) {
-                sb.style.removeProperty('display');
-                sb.style.removeProperty('margin-left');
-                sb.setAttribute('aria-expanded', 'true');
+            if (!sb || sb.getAttribute('data-goai-open') !== 'true') return;
+            if (!sb.contains(e.target) && e.target.id !== '_mob_hamburger') {
+                closeSidebar();
             }
-            h.style.display = 'none';
         });
         pdoc.body.appendChild(h);
     }
@@ -2039,6 +2056,11 @@ _components.html("""<script>
             h.style.color = '#00b847';
             h.style.border = '1px solid rgba(0,0,0,0.1)';
             h.style.boxShadow = '0 2px 12px rgba(0,0,0,.1)';
+        } else {
+            h.style.background = 'rgba(20,20,31,0.85)';
+            h.style.color = '#00ff6a';
+            h.style.border = '1px solid rgba(255,255,255,0.08)';
+            h.style.boxShadow = '0 2px 12px rgba(0,0,0,.3)';
         }
     }
 
@@ -2046,7 +2068,8 @@ _components.html("""<script>
         if (!isMobile()) return;
         const sb = pdoc.querySelector('section[data-testid="stSidebar"]');
         const h = pdoc.getElementById('_mob_hamburger');
-        if (sb && sb.getAttribute('aria-expanded') === 'true') {
+        const isOpen = sb && sb.getAttribute('data-goai-open') === 'true';
+        if (isOpen) {
             if (h) h.style.display = 'none';
         } else {
             createHamburger();
@@ -2054,14 +2077,25 @@ _components.html("""<script>
         }
     }
 
-    // Init: create hamburger on load
+    // Init + ensure hamburger stays visible
     if (isMobile()) {
         createHamburger();
         setTimeout(updateHamburgerTheme, 300);
     }
-
-    // Watch sidebar open/close
-    new MutationObserver(syncHamburger).observe(pdoc.body, {childList:true, subtree:true, attributes:true});
+    // Re-check hamburger on DOM changes (throttled)
+    let _syncT = null;
+    new MutationObserver(function() {
+        if (!isMobile()) return;
+        clearTimeout(_syncT);
+        _syncT = setTimeout(function() {
+            const sb = pdoc.querySelector('section[data-testid="stSidebar"]');
+            const isOpen = sb && sb.getAttribute('data-goai-open') === 'true';
+            if (!isOpen) {
+                createHamburger();
+                updateHamburgerTheme();
+            }
+        }, 100);
+    }).observe(pdoc.body, {childList:true, subtree:true});
 
     function clearMainContent() {
         const main = pdoc.querySelector('.main .block-container');
@@ -2096,17 +2130,27 @@ _components.html("""<script>
         clearTimeout(_navTimer);
         _navTimer = setTimeout(restoreMainContent, 300);
     }).observe(pdoc.body, {childList:true, subtree:true});
+    // Failsafe: never let overlay stay more than 3 seconds
+    setInterval(function() {
+        const ov = pdoc.getElementById('_nav_overlay');
+        if (ov && ov.style.display !== 'none') {
+            restoreMainContent();
+        }
+    }, 3000);
 
+    // --- Nav click listener (with dedup flag to prevent stacking) ---
     function attachNavListeners() {
         const sidebar = pdoc.querySelector('section[data-testid="stSidebar"]');
-        if (!sidebar) return;
+        if (!sidebar || sidebar._goaiNavBound) return;
+        sidebar._goaiNavBound = true;
         sidebar.addEventListener('click', function(e) {
             const btn = e.target.closest('button');
             if (!btn) return;
             const key = btn.getAttribute('data-testid') || '';
             if (key.includes('theme') || key.includes('logout') || key.includes('refresh') || key.includes('lk_top')) return;
+            // On mobile: close sidebar IMMEDIATELY (no setTimeout — iframe may die before it fires)
+            if (isMobile()) closeSidebar();
             clearMainContent();
-            if (isMobile()) setTimeout(closeSidebar, 100);
         }, true);
     }
 
@@ -5664,7 +5708,10 @@ if page == "Выручка":
 
         # --- Налоги (НДС) ---
         st.divider()
+        _tax_placeholder = st.empty()
+        _tax_placeholder.info("Загрузка данных по налогам..." if _get_lang()=="ru" else "Loading tax data...")
         tax_data = load_tax_breakdown(date_from, date_to)
+        _tax_placeholder.empty()
         if not tax_data.empty and "REVENUE" in tax_data.columns:
             st.markdown(f"### {t('taxes')}")
             total_tax_rev = float(tax_data["REVENUE"].sum())

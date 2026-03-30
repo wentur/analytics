@@ -75,9 +75,32 @@ def query(sql, params=None):
         return []
 
 
+def _discover_employee_column():
+    """Определить, какое поле в GLOBALSHIFTS ссылается на кассира/менеджера."""
+    # Проверяем наличие столбцов: IAUTHOR, ICASHIER, IMANAGER
+    cols = query("""
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'GLOBALSHIFTS'
+          AND COLUMN_NAME IN ('IAUTHOR', 'ICASHIER', 'IMANAGER', 'IEMPLOYEE')
+    """)
+    found = {r["COLUMN_NAME"] for r in cols}
+    log.info("GLOBALSHIFTS employee columns: %s", found)
+    # Приоритет: IAUTHOR > ICASHIER > IEMPLOYEE > IMANAGER
+    for col in ("IAUTHOR", "ICASHIER", "IEMPLOYEE", "IMANAGER"):
+        if col in found:
+            return col
+    return "IMANAGER"
+
+_EMP_COL = None
+
 def get_current_shifts():
     """Получить все открытые и недавно закрытые смены (за последние 24ч)."""
-    return query("""
+    global _EMP_COL
+    if _EMP_COL is None:
+        _EMP_COL = _discover_employee_column()
+        log.info("Using employee column: %s", _EMP_COL)
+
+    return query(f"""
         SELECT
             gs.MIDSERVER,
             gs.SHIFTNUM,
@@ -87,7 +110,7 @@ def get_current_shifts():
             e.NAME   AS MANAGER,
             r.NAME   AS REST_NAME
         FROM GLOBALSHIFTS gs
-        LEFT JOIN EMPLOYEES  e ON gs.IMANAGER    = e.SIFR
+        LEFT JOIN EMPLOYEES  e ON gs.{_EMP_COL} = e.SIFR AND gs.{_EMP_COL} > 0
         LEFT JOIN RESTAURANTS r ON gs.IRESTAURANT = r.SIFR
         WHERE gs.CREATETIME >= DATEADD(HOUR, -24, GETDATE())
           AND r.NAME IS NOT NULL

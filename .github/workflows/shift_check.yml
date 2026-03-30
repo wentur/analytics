@@ -1,0 +1,44 @@
+name: Shift Notifier
+
+on:
+  schedule:
+    # Каждые 10 минут
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    # Ручной запуск из GitHub UI
+
+jobs:
+  check-shifts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pymssql requests python-dotenv
+
+      # Восстанавливаем состояние смен с предыдущего запуска
+      - name: Restore shift state
+        uses: actions/cache@v4
+        with:
+          path: .shift_state.json
+          key: shift-state-${{ github.run_id }}
+          restore-keys: shift-state-
+
+      - name: Check shifts & notify
+        env:
+          RK7_HOST: ${{ secrets.RK7_HOST }}
+          RK7_PORT: ${{ secrets.RK7_PORT }}
+          RK7_USER: ${{ secrets.RK7_USER }}
+          RK7_PASSWORD: ${{ secrets.RK7_PASSWORD }}
+          RK7_DB: ${{ secrets.RK7_DB }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python shift_notifier.py

@@ -7,7 +7,7 @@
 import os, shutil, pathlib
 
 # Load .env file if exists (supports both ".env" and "env")
-_script_dir = os.path.dirname(os.path.abspath(__file__))
+_script_dir = os.path.dirname(os.path.abspat(__file__))
 _env_candidates = [os.path.join(_script_dir, ".env"), os.path.join(_script_dir, "env")]
 _env_file = next((p for p in _env_candidates if os.path.exists(p)), None)
 if _env_file:
@@ -5272,7 +5272,7 @@ if page == "Пульс":
         st.caption(f"{t('taxes_nds')}: " + " · ".join(tax_items))
 
     # --- Детали расходов ---
-    st.markdown(f"##### {t("details_label")}")
+    st.markdown(f'##### {t("details_label")}')
     d1, d2, d3, d4 = st.columns(4)
     _purch_from_api = _purch_cache_key in st.session_state
     with d1:
@@ -5701,7 +5701,7 @@ if page == "Выручка":
                     st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False,"scrollZoom":False})
         with cr:
             if guests>0:
-                st.markdown(f"### {t("per_guest")}")
+                st.markdown(f'### {t("per_guest")}')
                 st.metric(t("avg_check_guest"),f"{rev/guests:,.0f} ₽")
                 st.metric(t("guests_per_order"),f"{guests/n:.1f}" if n else "—")
                 st.metric(t("dishes_per_order"),f"{dishes_n/n:.1f}" if n else "—")
@@ -8965,7 +8965,7 @@ if page == "Фудкост (расчёт)":
     if not st.session_state.get(_fc_started_key, False) and recipe_costs.empty:
         st.divider()
         st.info(t("select_period_info"))
-        if st.button(f"📊 {t("calculate_foodcost")}", type="primary", use_container_width=True, key="fc_start_calc"):
+        if st.button(f'📊 {t("calculate_foodcost")}', type="primary", use_container_width=True, key="fc_start_calc"):
             st.session_state[_fc_started_key] = True
             st.rerun()
         st.stop()
@@ -9080,7 +9080,7 @@ if page == "Фудкост (расчёт)":
 
             st.divider()
             c1, c2, c3, c4 = st.columns(4)
-            with c1: st.metric(f"🔗 {t("matched")}", f"{len(fc)}")
+            with c1: st.metric(f'🔗 {t("matched")}', f"{len(fc)}")
             with c2: st.metric(t("rk_coverage"), f"{len(fc)/max(1,len(rk_prices))*100:.0f}%")
             if has_foodcost:
                 fc_with_cost = fc[fc["FOODCOST_PCT"].notna() & (fc["FOODCOST_PCT"] > 0) & (fc["FOODCOST_PCT"] < 300)]
@@ -9150,7 +9150,7 @@ if page == "Фудкост (расчёт)":
                     total_all_margin = total_all_revenue - total_all_cost
                     total_all_fc = (total_all_cost / total_all_revenue * 100) if total_all_revenue > 0 else 0
 
-                    st.markdown(f"### {t("summary_period")}: {date_from} — {date_to}")
+                    st.markdown(f'### {t("summary_period")}: {date_from} — {date_to}')
 
                     # --- РЯД 1: ИТОГО (главное) ---
                     r0c1, r0c2, r0c3, r0c4 = st.columns(4)
@@ -9170,7 +9170,7 @@ if page == "Фудкост (расчёт)":
 
                     # --- Детализация ---
                     # Товары С рецептурами (переработка)
-                    st.caption(f"📋 {t("with_recipes")}")
+                    st.caption(f'📋 {t("with_recipes")}')
                     r1c1, r1c2, r1c3, r1c4 = st.columns(4)
                     with r1c1: st.metric(t("revenue"), f"{total_revenue:,.0f} ₽")
                     with r1c2: st.metric(t("cost_label"), f"{total_cost:,.0f} ₽")
@@ -9185,7 +9185,7 @@ if page == "Фудкост (расчёт)":
                     # Товары БЕЗ переработки (купили → продали)
                     if no_recipe_revenue > 0:
                         st.divider()
-                        st.caption(f"📦 {t("without_processing")}")
+                        st.caption(f'📦 {t("without_processing")}')
                         no_recipe_margin = no_recipe_revenue - no_recipe_cost
                         no_recipe_fc = (no_recipe_cost / no_recipe_revenue * 100) if no_recipe_revenue > 0 else 0
                         r2c1, r2c2, r2c3, r2c4 = st.columns(4)
@@ -9798,7 +9798,7 @@ if page == "Доход/Расход":
     orders = load_orders(date_from, date_to)
 
     # === РУЧНЫЕ РАСХОДЫ (сохраняются в session_state) ===
-    st.markdown(f"### {t("fixed_costs_monthly")}")
+    st.markdown(f'### {t("fixed_costs_monthly")}')
     st.caption(t("fixed_costs_desc"))
 
     if "_fixed_costs" not in st.session_state:
@@ -9916,7 +9916,7 @@ if page == "Доход/Расход":
         # === СТРУКТУРА И WATERFALL ===
         cl, cr = st.columns(2)
         with cl:
-            st.markdown(f"### {t("expense_structure")}")
+            st.markdown(f'### {t("expense_structure")}')
             cost_items = []
             if purchases > 0: cost_items.append({"Статья": t("purchases_sh"), "Сумма": purchases})
             if tax_total > 0: cost_items.append({"Статья": t("taxes_nds"), "Сумма": tax_total})
@@ -9958,7 +9958,7 @@ if page == "Доход/Расход":
 
         # === ПО ДНЯМ ===
         st.divider()
-        st.markdown(f"### {t("revenue_vs_fixed")}")
+        st.markdown(f'### {t("revenue_vs_fixed")}')
         daily = load_daily(date_from, date_to)
         if not daily.empty and "REVENUE" in daily.columns:
             fig_d = go.Figure()

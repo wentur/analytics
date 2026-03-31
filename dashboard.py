@@ -7,7 +7,7 @@
 import os, shutil, pathlib
 
 # Load .env file if exists (supports both ".env" and "env")
-_script_dir = os.path.dirname(os.path.abspat(__file__))
+_script_dir = os.path.dirname(os.path.abspath(__file__))
 _env_candidates = [os.path.join(_script_dir, ".env"), os.path.join(_script_dir, "env")]
 _env_file = next((p for p in _env_candidates if os.path.exists(p)), None)
 if _env_file:
